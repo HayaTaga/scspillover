@@ -1,0 +1,37 @@
+---
+title: "Sudan Split: Replication"
+author: "scspill"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Sudan split}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=7, fig.height=4, message=FALSE, warning=FALSE)
+```
+
+```{r}
+library(scspill)
+data(sudan_split)
+
+W <- sudan_split$W_trade   # 行正規化（貿易連関）
+w <- sudan_split$w_trade
+df <- sudan_split$panel    # 列: unit, time, y（例: 一人当たりGDP）
+```
+
+```{r}
+fit <- sc_spillover(df, treated_unit = "Sudans", T0 = 11, w = w, W = W,
+                    M = 2000, burn = 1000, seed = 1, verbose = FALSE)
+summary(fit)
+```
+
+```{r fig3b}
+plot(fit, type = "treated")
+```
+
+```{r fig4}
+idx_EG <- which(fit$inputs$units$controls == "Egypt")
+plot(fit, type = "spillover", unit_index = idx_EG)
+```

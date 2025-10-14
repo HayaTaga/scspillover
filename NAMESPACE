@@ -1,0 +1,8 @@
+export(sc_spillover)
+export(plot.scspill)
+export(summary.scspill)
+import(Matrix)
+importFrom(stats, rnorm, runif, sd)
+importFrom(ggplot2, ggplot, aes, geom_line, geom_ribbon, theme_minimal, labs)
+S3method(plot, scspill)
+S3method(summary, scspill)

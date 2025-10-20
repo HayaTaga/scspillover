@@ -18,34 +18,34 @@ knitr::opts_chunk$set(
 ```
 
 ```{r}
-library(scspill)
-data(sudan_secession)
+# library(scspill)
+# data(sudan_secession)
 
-W <- sudan_secession$W # 行正規化（貿易連関）
-w <- sudan_secession$w
-df <- sudan_secession$panel # 列: unit, time, y（例: 一人当たりGDP）
+# W <- sudan_secession$W # 行正規化（貿易連関）
+# w <- sudan_secession$w
+# df <- sudan_secession$panel # 列: unit, time, y（例: 一人当たりGDP）
 ```
 
 ```{r}
-fit <- sc_spillover(
-  df,
-  treated_unit = "Sudans",
-  T0 = 11,
-  w = w,
-  W = W,
-  M = 2000,
-  burn = 1000,
-  seed = 1,
-  verbose = FALSE
-)
-summary(fit)
+# fit <- sc_spillover(
+#   df,
+#   treated_unit = "Sudans",
+#   T0 = 11,
+#   w = w,
+#   W = W,
+#   M = 2000,
+#   burn = 1000,
+#   seed = 1,
+#   verbose = FALSE
+# )
+# summary(fit)
 ```
 
 ```{r fig3b}
-plot(fit, type = "treated")
+# plot(fit, type = "treated")
 ```
 
 ```{r fig4}
-idx_EG <- which(fit$inputs$units$controls == "Egypt")
-plot(fit, type = "spillover", unit_index = idx_EG)
+# idx_EG <- which(fit$inputs$units$controls == "Egypt")
+# plot(fit, type = "spillover", unit_index = idx_EG)
 ```

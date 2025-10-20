@@ -13,24 +13,24 @@ knitr::opts_chunk$set(fig.width=7, fig.height=4, message=FALSE, warning=FALSE)
 ```
 
 ```{r}
-library(scspill)
+# library(scspill)
 
-# パッケージ内のテスト補助スクリプトを再利用
-# （インストール後は system.file で取得可能）
-helper <- system.file("tests/testthat/helper-sim.R", package = "scspill")
-source(helper)
+# # パッケージ内のテスト補助スクリプトを再利用
+# # （インストール後は system.file で取得可能）
+# helper <- system.file("tests/testthat/helper-sim.R", package = "scspill")
+# source(helper)
 
-set.seed(1)
-sim <- gen_sim(N = 36, T = 30, T0 = 20, rho = 0.3)
+# set.seed(1)
+# sim <- gen_sim(N = 36, T = 30, T0 = 20, rho = 0.3)
 
-fit <- sc_spillover(sim$panel, treated_unit = "T0", T0 = sim$T0,
-                    w = sim$w, W = sim$W,
-                    M = 1000, burn = 500, seed = 1, verbose = FALSE)
-summary(fit)
+# fit <- sc_spillover(sim$panel, treated_unit = "T0", T0 = sim$T0,
+#                     w = sim$w, W = sim$W,
+#                     M = 1000, burn = 500, seed = 1, verbose = FALSE)
+# summary(fit)
 ```
 
 
 ```{r}
-plot(fit, type = "treated")
+# plot(fit, type = "treated")
 ```
 

@@ -163,14 +163,19 @@ sc_spillover <- function(
           W = as.matrix(W)
      )
 
-     new_scspill(
+     structure(list(
           alpha_draws = alpha_draws,
           rho_draws = rho_draws,
           alpha_hat = alpha_hat,
           rho_hat = rho_hat,
           effects = eff,
           inputs = inputs,
-          sar = sar
+          sar = sar,
+          T0 = T0,
+          hs=hs,
+          sar=sar
+          ),
+          class = "scspill"
      )
 }
 

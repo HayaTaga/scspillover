@@ -5,7 +5,7 @@ using namespace Rcpp;
 using namespace arma;
 
 // =========================== Utilities ===========================
-inline double rinvgamma(double shape, double rate) { return 1.0 / R::rgamma(shape, rate); }
+inline double rinvgamma(double shape, double scale) { return 1.0 / R::rgamma(shape, 1 / scale); }
 
 inline double logdet_signed(const arma::mat& A) {
   double sign=0.0, val=0.0;
@@ -81,19 +81,17 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
 
   // 事前・初期化
   vec alpha_curr = 1e-4 * randn<vec>(N);
-  vec sigma2_i_curr(N, fill::ones);        // ← Julia: sigma2_i[1,:] 相当（各 i）
-  vec nu_sigma_i_curr(N, fill::ones);      // ← Julia: nu_sigma_i[1,:] 相当（各 i）
+  vec sigma2_i_curr(N, fill::ones);
+  vec nu_sigma_i_curr(N, fill::ones);
   double tau2_curr   = 1.0;
   double nu_tau_curr = 1.0;
   double sigma2_curr = as_scalar(var(Y0_pre));
   if (!arma::is_finite(sigma2_curr) || sigma2_curr <= 0.0) sigma2_curr = 1.0;
   double nu_sigma_curr = 1.0;
 
-  // 使い回し
-  mat XtX = control_outcome_pre.t() * control_outcome_pre;   // D_temp
+  mat XtX = control_outcome_pre.t() * control_outcome_pre;
   vec Xty = control_outcome_pre.t() * Y0_pre;
 
-  // 出力（burn を除く）
   const int M = std::max(0, iters - burn);
   mat draws(M, N, fill::none);
 
@@ -104,11 +102,12 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
     }
 
     // ===== D = D_temp + sigma2 * Diagonal(1 ./ sigma2_i) =====
-    vec inv_sigma2_i = 1.0 / clamp(sigma2_i_curr, FLO, FHI);
+    vec inv_sigma2_i = 1.0 / clamp(sigma2_i_curr, FLO, FHI); // = 1/λ_j^2
     double sig2 = std::min(std::max(sigma2_curr, FLO), FHI);
+    double tau2 = std::min(std::max(tau2_curr,   FLO), FHI);
 
     mat D = XtX;
-    D.diag() += sig2 * inv_sigma2_i;
+    D.diag() += sig2 * (inv_sigma2_i / tau2); //  σ^2 * (1 / (τ^2 λ_j^2))
 
     // cholesky(D)
     mat R;                                  // 上三角：D = R^T R
@@ -116,19 +115,17 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
     if (!ok) Rcpp::stop("chol(D) failed even after stabilization.");
 
     // ===== D_inv = Symmetric( D_chol \ I ) =====
-    //  D^{-1} = (R^{-1})(R^{-T}) を I に逐次 solve して構成
     mat I_N = eye<mat>(N, N);
     mat D_inv = solve(trimatu(R), I_N, solve_opts::fast);
     D_inv = solve(trimatl(R.t()), D_inv, solve_opts::fast);
-    symmetrize_inplace(D_inv);              // Julia の Symmetric と同じ趣旨
+    symmetrize_inplace(D_inv);
 
     // ===== alpha_mean = D_inv * X' * Y0,  alpha_cov = sigma2 * D_inv =====
     vec alpha_mean = D_inv * Xty;
 
     // サンプリング：alpha ~ N(alpha_mean, sigma2 * D_inv)
-    // ここでも Cholesky を使う（MvNormal と同値）
     // L = sqrt(sigma2) * chol(D_inv)
-    mat Rinv;                               // D_inv = Rinv^T Rinv
+    mat Rinv;
     bool ok2 = robust_chol(Rinv, D_inv);
     if (!ok2) Rcpp::stop("chol(D_inv) failed even after stabilization.");
 
@@ -136,8 +133,6 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
     vec step = solve(trimatu(Rinv), z, solve_opts::fast);  // step = Rinv^{-1} z
     vec alpha_new = alpha_mean + std::sqrt(sig2) * step;   // = μ + L z
     alpha_curr = alpha_new;
-
-    // ===== 各パラメータの更新（Julia と同一式） =====
 
     // sigma2_i[i] ~ IG(1, 0.5*alpha[i]^2 + 1/nu_sigma_i[i])
     vec sigma2_i_next(N);

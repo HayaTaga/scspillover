@@ -8,6 +8,13 @@ returns posterior draws of weights and rho, and identified treatment/spillover e
 ## Install
 
 ```r
+install.packages(c("devtools","roxygen2","testthat","rmarkdown","progress","ggplot2","Matrix"))
+devtools::document()
+devtools::build()
+devtools::check()
+```
+
+```r
 # remotes::install_github("yourname/scspill")
 library(scspill)
 # panel: data.frame(unit, time, y)

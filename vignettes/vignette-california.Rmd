@@ -9,22 +9,36 @@ vignette: >
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(fig.width=7, fig.height=4, message=FALSE, warning=FALSE)
+knitr::opts_chunk$set(
+  fig.width = 7,
+  fig.height = 4,
+  message = FALSE,
+  warning = FALSE
+)
 ```
 
 ```{r}
 library(scspill)
-data(cali_tobacco)
-str(cali_tobacco)
+data(california_smoking)
+str(california_smoking)
 
-W <- cali_tobacco$W      # 行正規化隣接行列 (N x N)
-w <- cali_tobacco$w      # treated(=CA)への結合度ベクトル (長さN)
-panel <- cali_tobacco$panel  # 列: unit, time, y
+W <- california_smoking$W # 行正規化隣接行列 (N x N)
+w <- california_smoking$w # treated(=CA)への結合度ベクトル (長さN)
+panel <- california_smoking$panel # 列: unit, time, y
 ```
 
 ```{r}
-fit <- sc_spillover(panel, treated_unit = "CA", T0 = 18, w = w, W = W,
-                    M = 2000, burn = 1000, seed = 1, verbose = FALSE)
+fit <- sc_spillover(
+  panel,
+  treated_unit = "CA",
+  T0 = 18,
+  w = w,
+  W = W,
+  M = 2000,
+  burn = 1000,
+  seed = 1,
+  verbose = FALSE
+)
 summary(fit)
 ```
 

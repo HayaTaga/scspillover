@@ -1,6 +1,15 @@
 # ---------------- 共通ユーティリティ ----------------
 
-`%||%` <- function(a, b) if (!is.null(a)) a else b
+`%||%` <- function(x, y) if (!is.null(x)) x else y
+
+.as_num <- function(x) {
+  if (is.null(x)) return(numeric(0))
+  as.numeric(x)
+}
+.as_mat <- function(x) {
+  if (is.null(x)) return(matrix(numeric(0), 0, 0))
+  as.matrix(x)
+}
 
 .get_times_pre <- function(fit) {
   # 優先: inputs$times_pre, 次点: rownames(Yc_pre), 最後: 1:T0
@@ -146,51 +155,31 @@ scspill_counterfactual <- function(fit, cred = 0.95) {
 
 #' @keywords internal
 tidy_scspill <- function(fit) {
-  stopifnot(inherits(fit, "scspill"))
+  y0_pre  <- .as_num(fit$inputs$Y0_pre)
+  y0_post <- .as_num(fit$inputs$Y0_post)
+  Yc_pre  <- .as_mat(fit$inputs$Yc_pre)
+  Yc_post <- .as_mat(fit$inputs$Yc_post)
 
-  times_post <- .get_times_post(fit)
-  units_ctrl <- .get_units_control(fit, ncol(fit$effects$spill$mean))
+  T0 <- length(y0_pre)
+  T1 <- length(y0_post)
+  T  <- T0 + T1
 
-  # treated effect（post）
-  df_treat <- data.frame(
-    time = times_post,
-    mean = fit$effects$treat$mean,
-    lo = fit$effects$treat$lo,
-    hi = fit$effects$treat$hi
+  # times（無ければ 1..T0, 1..T1 にフォールバック）
+  t_pre  <- fit$inputs$times$pre
+  if (is.null(t_pre))  t_pre  <- .safe_seq(T0, start = 1L)
+  t_post <- fit$inputs$times$post
+  if (is.null(t_post)) t_post <- .safe_seq(T1, start = if (T0 > 0L) (t_pre[T0] + 1L) else 1L)
+
+  # 連結（長さが T と違えば 1..T に張り替え）
+  t_all <- c(t_pre, t_post)
+  if (length(t_all) != T) t_all <- .safe_seq(T, start = 1L)
+
+  list(
+    T0 = T0, T1 = T1, T = T,
+    t_all = t_all,
+    y0_all = c(y0_pre, y0_post),
+    Yc_all = rbind(Yc_pre, Yc_post)
   )
-
-  # spill（post）
-  sm <- fit$effects$spill$mean
-  slo <- fit$effects$spill$lo
-  shi <- fit$effects$spill$hi
-  df_spill <- do.call(
-    rbind,
-    lapply(seq_len(ncol(sm)), function(j) {
-      data.frame(
-        time = times_post,
-        unit = units_ctrl[j],
-        mean = sm[, j],
-        lo = slo[, j],
-        hi = shi[, j]
-      )
-    })
-  )
-
-  # パラメータ要約
-  df_param <- data.frame(
-    param = "rho",
-    mean = mean(fit$rho_draws),
-    sd = stats::sd(fit$rho_draws),
-    q025 = stats::quantile(fit$rho_draws, 0.025),
-    q975 = stats::quantile(fit$rho_draws, 0.975)
-  )
-
-  weights <- data.frame(
-    unit = units_ctrl,
-    alpha = as.numeric(fit$alpha_hat)
-  )
-
-  list(treat = df_treat, spill = df_spill, params = df_param, weights = weights)
 }
 
 # ---------------- S3: plot.scspill（既定=前後含む“実測vs反事実”） ----------------

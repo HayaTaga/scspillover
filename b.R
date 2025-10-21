@@ -11,7 +11,10 @@ source("R/01_utils.R")
 source("R/21_mcmc_alpha.R")
 source("R/22_mcmc_sar.R")
 source("R/10_sc_spillover.R")
+source("R/03_utils_plot.R")
+source("R/40_geweke.R")
 Rcpp::sourceCpp("./R/20_mcmc.cpp")
+Rcpp::sourceCpp("./R/40_geweke.cpp")
 
 
 panel_df <- california_smoking$panel
@@ -54,6 +57,25 @@ pp_check(fit, what = "treat_last_dist")
 pp_check(fit, what = "rho_trace")
 
 diagnostics(fit, what = "trace")
+
+
+set.seed(1)
+N <- 6; K <- 2; p <- 0; T0 <- 12
+W <- matrix(0, N, N); W[row(W)==col(W)] <- 0
+# 適当に 1 近傍にエッジ、行和1に正規化
+for (i in 1:N) { j <- if (i<N) i+1 else 1; W[i,j] <- 1 }
+W <- W / rowSums(W)
+w <- rep(0, N); w[2] <- 1
+
+# 実行
+res <- scspill_geweke(M1=1500, M2=1500,
+                      dims=list(T0=T0, N=N, K=K, p=p),
+                      W=W, w=w,
+                      priors=list(a0=1, b0=1),
+                      verbose=TRUE)
+
+round(sort(abs(res$z), decreasing=TRUE), 3)
+signif(res$pval, 3)
 
 # data <- panel_df
 # w <- as.matrix(w_vec[, 2])

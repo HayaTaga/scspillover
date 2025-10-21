@@ -76,38 +76,52 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
   const int N  = (int)control_outcome_pre.n_cols;
   const int iters = iteration;
 
-  // しきい値（縮退防止）
   const double FLO = 1e-12, FHI = 1e12;
 
-  // 事前・初期化
+  
   vec alpha_curr = 1e-4 * randn<vec>(N);
+
+  arma::vec sx(N);
+  for (int j=0; j<N; ++j){
+    double sdj = std::sqrt(arma::var(control_outcome_pre.col(j)));
+    if(!arma::is_finite(sdj) || sdj < 1e-8) sdj = 1e-8;
+    sx(j) = sdj;
+  }
+
+  double sy = std::sqrt(arma::var(Y0_pre));
+  if(!arma::is_finite(sy) || sy < 1e-8) sy = 1e-8;
+
+  arma::mat X = control_outcome_pre;
+  for (int j=0; j<N; ++j) X.col(j) /= sx(j);
+  arma::vec y = Y0_pre / sy;
+
   vec sigma2_i_curr(N, fill::ones);
   vec nu_sigma_i_curr(N, fill::ones);
   double tau2_curr   = 1.0;
   double nu_tau_curr = 1.0;
-  double sigma2_curr = as_scalar(var(Y0_pre));
+  double sigma2_curr = as_scalar(var(y));
   if (!arma::is_finite(sigma2_curr) || sigma2_curr <= 0.0) sigma2_curr = 1.0;
   double nu_sigma_curr = 1.0;
 
-  mat XtX = control_outcome_pre.t() * control_outcome_pre;
-  vec Xty = control_outcome_pre.t() * Y0_pre;
+  mat XtX = X.t() * X;
+  vec Xty = X.t() * y;
 
   const int M = std::max(0, iters - burn);
   mat draws(M, N, fill::none);
 
-  for (int iter = 2; iter <= iters; ++iter) {
-    if (verbose && ((iter-1) % 2000 == 0)) {
-      Rcpp::Rcout << "Now, iteration = " << (iter-1) << "\n";
+  for (int iter = 1; iter <= iters; ++iter) {
+    if (verbose && (iter % 2000 == 0)) {
+      Rcpp::Rcout << "Now, iteration = " << iter << "\n";
       Rcpp::checkUserInterrupt();
     }
 
     // ===== D = D_temp + sigma2 * Diagonal(1 ./ sigma2_i) =====
-    vec inv_sigma2_i = 1.0 / clamp(sigma2_i_curr, FLO, FHI); // = 1/λ_j^2
+    vec inv_sigma2_i = 1.0 / clamp(sigma2_i_curr, FLO, FHI);
     double sig2 = std::min(std::max(sigma2_curr, FLO), FHI);
-    double tau2 = std::min(std::max(tau2_curr,   FLO), FHI);
-
+    double tau2 = std::min(std::max(tau2_curr, FLO), FHI);
+    // Rcpp::Rcout << sig2 << '\n';
     mat D = XtX;
-    D.diag() += sig2 * (inv_sigma2_i / tau2); //  σ^2 * (1 / (τ^2 λ_j^2))
+    D.diag() += sig2 * (inv_sigma2_i);
 
     // cholesky(D)
     mat R;                                  // 上三角：D = R^T R
@@ -116,8 +130,9 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
 
     // ===== D_inv = Symmetric( D_chol \ I ) =====
     mat I_N = eye<mat>(N, N);
-    mat D_inv = solve(trimatu(R), I_N, solve_opts::fast);
-    D_inv = solve(trimatl(R.t()), D_inv, solve_opts::fast);
+    // mat D_inv = solve(trimatu(R), I_N, solve_opts::fast);
+    // D_inv = solve(trimatl(R.t()), D_inv, solve_opts::fast);
+    mat D_inv = solve(D, I_N, solve_opts::fast);
     symmetrize_inplace(D_inv);
 
     // ===== alpha_mean = D_inv * X' * Y0,  alpha_cov = sigma2 * D_inv =====
@@ -125,13 +140,19 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
 
     // サンプリング：alpha ~ N(alpha_mean, sigma2 * D_inv)
     // L = sqrt(sigma2) * chol(D_inv)
-    mat Rinv;
-    bool ok2 = robust_chol(Rinv, D_inv);
-    if (!ok2) Rcpp::stop("chol(D_inv) failed even after stabilization.");
+    // mat Rinv;
+    // bool ok2 = robust_chol(Rinv, D_inv);
+    // if (!ok2) Rcpp::stop("chol(D_inv) failed even after stabilization.");
 
-    vec z = randn<vec>(N);
-    vec step = solve(trimatu(Rinv), z, solve_opts::fast);  // step = Rinv^{-1} z
-    vec alpha_new = alpha_mean + std::sqrt(sig2) * step;   // = μ + L z
+    // vec z = randn<vec>(N);
+    // vec step = solve(trimatu(Rinv), z, solve_opts::fast);
+    // vec alpha_new = alpha_mean + std::sqrt(sig2) * step;
+    // alpha_curr = alpha_new;
+
+    arma::mat Sigma = std::max(sig2, 1e-12) * D_inv;  // 共分散行列 Σ = σ² · A⁻¹
+    // Rcpp::Rcout << alpha_mean << "\n";
+    // Rcpp::Rcout << Sigma << "\n";
+    arma::vec alpha_new = arma::mvnrnd(alpha_mean, Sigma, 1);  // 多変量正規 N(μ, Σ) から1サンプル
     alpha_curr = alpha_new;
 
     // sigma2_i[i] ~ IG(1, 0.5*alpha[i]^2 + 1/nu_sigma_i[i])
@@ -161,7 +182,7 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
     nu_tau_curr = std::min(std::max(rinvgamma(1.0, sc_nutau), FLO), FHI);
 
     // sigma2 ~ IG(1 + T0/2, 1/nu_tau + 1/nu_sigma + 0.5 * SSE)
-    vec res = Y0_pre - control_outcome_pre * alpha_curr;
+    vec res = y - X * alpha_curr;
     double sse = dot(res, res);
     double shape_sig = 1.0 + 0.5 * T0;
     double sc_sig = 1.0 / std::max(nu_tau_curr, FLO) + 1.0 / std::max(nu_sigma_curr, FLO) + 0.5 * sse;
@@ -172,7 +193,9 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
     nu_sigma_curr = std::min(std::max(rinvgamma(1.0, sc_nus), FLO), FHI);
 
     // keep
-    if (iter > burn) draws.row(iter - burn - 1) = alpha_curr.t();
+    if (iter > burn){
+      for (int j=0; j<N; ++j) draws(iter - burn - 1, j) = (sy / sx(j)) * alpha_curr[j];
+    }
   }
 
   return draws;

@@ -36,7 +36,7 @@ fit <- sc_spillover(
   X = c("retprice"), # 共変量（列名ベクトル）
   p_factors = 1, # Appendixの因子レイヤを1つ使用
   M = 10000,
-  burn = 2000,
+  burn = 5000,
   seed = 1,
   unit_col = "state",
   time_col = "year"

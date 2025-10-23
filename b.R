@@ -70,7 +70,7 @@ diag_tab[order(diag_tab$ess, decreasing = TRUE), ]
 
 
 set.seed(1)
-N <- 6L
+N <- 16L
 K <- 0L
 p <- 0L
 T0 <- 12L

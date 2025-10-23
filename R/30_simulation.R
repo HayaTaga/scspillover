@@ -1,353 +1,322 @@
-# 必要：quadprog（SCMの凸最適化）
-if (!requireNamespace("quadprog", quietly = TRUE)) {
-  install.packages("quadprog")
-}
+# =========================================================
+# Utilities
+# =========================================================
+`%||%` <- function(x, y) if (!is.null(x)) x else y
 
-# ----------------------------
-# 1回分のシミュレーション推定（SCM / BSCM / Proposed）
-# ----------------------------
-run_one_sim <- function(
-  dgp,
-  M_alpha = 2000, # α のMCMC反復
-  burn_alpha = 1000, # α のバーンイン
-  M_sar = 4000, # ρ のMCMC反復
-  burn_sar = 2000, # ρ のバーンイン
-  step_rho = 0.02, # ρ のRW幅（C++側と整合）
-  add_pred_noise = TRUE # BSCMのポスト予測に pre 残差ノイズを足すか
-) {
-  Y0_pre <- dgp$data$Y0_pre
-  Yc_pre <- dgp$data$Yc_pre
-  Y0_post <- dgp$data$Y0_post
-  Yc_post <- dgp$data$Yc_post
-  W <- dgp$W
-  w <- as.numeric(dgp$w)
-  tau_true <- dgp$truth$tau_post
-  T1 <- length(tau_true)
+.q025q975 <- function(x) stats::quantile(x, c(0.025, 0.975), names = FALSE, type = 8)
+
+# rook 型の隣接行列（行標準化）
+rook_W <- function(nrow, ncol, normalize = TRUE) {
+  N <- nrow * ncol
+  nb <- matrix(0, N, N)
+  id <- function(r, c) (r - 1L) * ncol + c
+  for (r in 1:nrow) for (c in 1:ncol) {
+    i <- id(r, c)
+    if (r > 1)    nb[i, id(r - 1, c)] <- 1
+    if (r < nrow) nb[i, id(r + 1, c)] <- 1
+    if (c > 1)    nb[i, id(r, c - 1)] <- 1
+    if (c < ncol) nb[i, id(r, c + 1)] <- 1
+  }
+  if (normalize) {
+    rs <- rowSums(nb); rs[rs == 0] <- 1
+    nb <- nb / rs
+  }
+  nb
+}
+make_w <- function(N, treated = 1L) { w <- numeric(N); w[treated] <- 1; w }
+
+# =========================================================
+# SCM: convex QP solver
+# =========================================================
+if (!requireNamespace("quadprog", quietly = TRUE)) install.packages("quadprog")
+
+.scM_qp <- function(y0_pre, Yc_pre, ridge = 1e-8) {
   N <- ncol(Yc_pre)
+  Dmat <- crossprod(Yc_pre) + diag(ridge, N)
+  dvec <- crossprod(Yc_pre, y0_pre)
+  Amat <- cbind(rep(1, N), diag(N))  # sum(a)=1 (eq), a>=0 (ineq)
+  bvec <- c(1, rep(0, N))
+  sol  <- quadprog::solve.QP(Dmat, dvec, Amat, bvec, meq = 1)
+  as.numeric(sol$solution)
+}
 
-  ## =======================
-  ## A) 古典的 SCM（preでα学習）
-  ## =======================
-  {
-    y <- as.numeric(Y0_pre)
-    X <- as.matrix(Yc_pre) # T0 x N
-    ridge <- 1e-8
-    D <- crossprod(X) + ridge * diag(N)
-    d <- crossprod(X, y)
-    Amat <- cbind(rep(1, N), diag(N)) # 制約: 1'a=1, a>=0
-    bvec <- c(1, rep(0, N))
-    qp <- quadprog::solve.QP(
-      Dmat = D,
-      dvec = d,
-      Amat = Amat,
-      bvec = bvec,
-      meq = 1
-    )
-    a_scm <- drop(qp$solution)
-
-    ycf_pre <- as.numeric(Yc_pre %*% a_scm)
-    ycf_post <- as.numeric(Yc_post %*% a_scm)
-    resid_pre <- Y0_pre - ycf_pre
-    sd_pre <- stats::sd(resid_pre)
-
-    eff_scm <- Y0_post - ycf_post
-    lo_scm <- eff_scm - 1.96 * sd_pre
-    hi_scm <- eff_scm + 1.96 * sd_pre
-    covered_scm <- as.integer(lo_scm <= tau_true & tau_true <= hi_scm)
-
-    ATE_scm_mean <- mean(eff_scm)
-    ATE_scm_lo <- ATE_scm_mean - 1.96 * sd_pre / sqrt(T1)
-    ATE_scm_hi <- ATE_scm_mean + 1.96 * sd_pre / sqrt(T1)
-    ATE_scm_cov <- as.integer(
-      ATE_scm_lo <= mean(tau_true) & mean(tau_true) <= ATE_scm_hi
-    )
-
-    scm <- list(
-      alpha = a_scm,
-      per_time = data.frame(
-        t = seq_len(T1),
-        eff_mean = eff_scm,
-        eff_lo = lo_scm,
-        eff_hi = hi_scm,
-        covered = covered_scm
-      ),
-      ATE = data.frame(
-        mean = ATE_scm_mean,
-        lo = ATE_scm_lo,
-        hi = ATE_scm_hi,
-        covered = ATE_scm_cov
-      )
-    )
+# =========================================================
+# Counterfactual under SCSPILL structure (post)
+# =========================================================
+.scspill_cf_post <- function(Y0_post, Yc_post, W, w, alpha_hat, rho_hat) {
+  N  <- length(alpha_hat)
+  IN <- diag(N)
+  Ainv <- solve(IN - rho_hat * (w %*% t(alpha_hat) + W))
+  B    <- (IN - rho_hat * W)
+  T1 <- nrow(Yc_post)
+  ycf <- numeric(T1)
+  for (t in seq_len(T1)) {
+    tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho_hat * w * Y0_post[t])
+    ycf[t] <- as.numeric(crossprod(alpha_hat, tmp))
   }
+  ycf
+}
 
-  ## =======================
-  ## B) Bayesian SCM（αのみ; preでMCMC, postで事後予測）
-  ## =======================
-  {
-    alpha_draws <- hs_alpha_gibbs_cpp(
-      Y0_pre = Y0_pre,
-      control_outcome_pre = Yc_pre,
-      iteration = M_alpha,
-      burn = burn_alpha,
-      verbose = FALSE
-    ) # (M_alpha - burn) x N
-    M_a <- nrow(alpha_draws)
+# =========================================================
+# DGP (指示の4ステップで素直に生成)
+#   1) Yc^0_t = (I - ρW - wαᵀ)^{-1}(X_tβ + ε_t)
+#   2) Y0^0_t = αᵀ Yc^0_t     （perfect fit）
+#   3) Y0^1_t = Y0^0_t + τ_t,  τ_t ~ N(μ_τ, σ_τ^2)
+#   4) Yc^1_t = (I - ρW)^{-1}(w Y0^1_t + X_tβ + ε_t)
+# =========================================================
+scspill_sim_dgp <- function(
+  T0, T1, N, W, w,
+  rho, sigma2,
+  alpha,                 # 長さN（合成重みの真値）
+  K = 0, beta = NULL,    # K=0ならbetaはNULLでOK
+  seed = NULL,
+  mu_tau = 1.0, sd_tau = 1.0
+) {
+  if (!is.null(seed)) set.seed(seed)
+  stopifnot(is.matrix(W), nrow(W) == N, ncol(W) == N)
+  stopifnot(length(w) == N, length(alpha) == N)
+  if (K > 0 && is.null(beta)) stop("K>0 なら beta を与えてください。")
+  if (is.null(beta)) beta <- numeric(0)
 
-    # pre残差sdを各ドローで推定（予測ノイズオプション用）
-    sd_pre_by_m <- if (add_pred_noise) {
-      apply(alpha_draws, 1, function(a) {
-        r <- Y0_pre - as.numeric(Yc_pre %*% as.numeric(a))
-        stats::sd(r)
-      })
+  IN <- diag(N)
+
+  # (A) no-treatment world 全期間
+  A_pre <- IN - rho * W - rho * (w %*% t(alpha))
+  rcA <- tryCatch(rcond(A_pre), error = function(e) NA_real_)
+  if (!is.finite(rcA) || rcA < 1e-10) stop("A_pre is near singular.")
+
+  A_pre_inv <- solve(A_pre)
+
+  X_pre  <- if (K > 0) array(rnorm(T0 * N * K), dim = c(T0, N, K)) else NULL
+  X_post <- if (K > 0) array(rnorm(T1 * N * K), dim = c(T1, N, K)) else NULL
+
+  TT <- T0 + T1
+  Yc0_all <- matrix(NA_real_, TT, N)
+  Y00_all <- numeric(TT)
+
+  gen_yc0 <- function(Xt) {
+    rhs <- if (K > 0) as.numeric(Xt %*% beta) else rep(0, N)
+    rhs <- rhs + rnorm(N, 0, sqrt(max(sigma2, 1e-12)))
+    as.numeric(A_pre_inv %*% rhs)
+  }
+  for (t in 1:TT) {
+    Xt <- if (t <= T0) {
+      if (K > 0) matrix(X_pre[t, , , drop = FALSE],  N, K) else NULL
     } else {
-      rep(NA_real_, M_a)
+      if (K > 0) matrix(X_post[t - T0, , , drop = FALSE], N, K) else NULL
     }
-
-    eff_draws <- matrix(NA_real_, nrow = T1, ncol = M_a)
-    for (m in 1:M_a) {
-      a <- as.numeric(alpha_draws[m, ])
-      mu_post <- as.numeric(Yc_post %*% a)
-      if (add_pred_noise) {
-        eff_draws[, m] <- Y0_post - (mu_post + rnorm(T1, 0, sd_pre_by_m[m]))
-      } else {
-        eff_draws[, m] <- Y0_post - mu_post
-      }
-    }
-    eff_mean <- rowMeans(eff_draws)
-    q_b <- t(apply(eff_draws, 1, stats::quantile, probs = c(0.025, 0.975)))
-    covered_b <- as.integer(q_b[, 1] <= tau_true & tau_true <= q_b[, 2])
-
-    ATE_b_means <- colMeans(eff_draws)
-    ATE_b_lohi <- stats::quantile(ATE_b_means, c(0.025, 0.975))
-    ATE_b_cov <- as.integer(
-      ATE_b_lohi[1] <= mean(tau_true) & mean(tau_true) <= ATE_b_lohi[2]
-    )
-
-    bscm <- list(
-      alpha_draws = alpha_draws,
-      per_time = data.frame(
-        t = seq_len(T1),
-        eff_mean = eff_mean,
-        eff_lo = q_b[, 1],
-        eff_hi = q_b[, 2],
-        covered = covered_b
-      ),
-      ATE = data.frame(
-        mean = mean(ATE_b_means),
-        lo = ATE_b_lohi[1],
-        hi = ATE_b_lohi[2],
-        covered = ATE_b_cov
-      )
-    )
+    yc0 <- gen_yc0(Xt)
+    Yc0_all[t, ] <- yc0
+    Y00_all[t]   <- sum(alpha %*% yc0)
   }
 
-  ## =======================
-  ## C) Proposed: SC-SPILL（αとρを併用）
-  ##    αはBSCMのドロー、ρはSAR MCMCのドローを使用し、同時式で反事実を再構成
-  ## =======================
-  {
-    # SAR（pre; K=0, p=0で十分）
-    sar <- sar_full_sampler_cpp(
-      Y0_pre = Y0_pre,
-      Yc_pre = Yc_pre,
-      Xc_pre_ = NULL, # K=0
-      T0 = nrow(Yc_pre),
-      N = ncol(Yc_pre),
-      K = 0,
-      p = 0,
-      w = w,
-      W = W,
-      iteration = M_sar,
-      burn = burn_sar,
-      step_rho = step_rho,
-      a0 = 1.0,
-      b0 = 1.0,
-      verbose = FALSE
-    )
-    rho_draws <- as.numeric(sar$rho) # (M_sar - burn_sar)
-    M_s <- length(rho_draws)
+  # (B) post: treatment shock & SAR
+  A_post <- IN - rho * W
+  rcB <- tryCatch(rcond(A_post), error = function(e) NA_real_)
+  if (!is.finite(rcB) || rcB < 1e-10) stop("A_post is near singular.")
+  A_post_inv <- solve(A_post)
 
-    # α と ρ のドロー数を合わせる（短い方に合わせて先頭を使用）
-    M <- min(nrow(bscm$alpha_draws), M_s)
-    A <- as.matrix(bscm$alpha_draws[1:M, , drop = FALSE]) # M x N
-    R <- rho_draws[1:M]
+  tau_post  <- rnorm(T1, mean = mu_tau, sd = sd_tau)
+  Y01_post  <- Y00_all[(T0 + 1):TT] + tau_post
 
-    IN <- diag(N)
-    eff_p_draws <- matrix(NA_real_, nrow = T1, ncol = M)
-
-    # 1時点ずつ： y_cf = a' Ainv { (I - r W) y_c - r w y0 }
-    for (t in 1:T1) {
-      yc <- as.numeric(Yc_post[t, ])
-      y0 <- Y0_post[t]
-      for (m in 1:M) {
-        a <- as.numeric(A[m, ])
-        r <- R[m]
-        # 数値安定（行列が特異ならNA）
-        Mmat <- tryCatch(IN - r * (w %*% t(a) + W), error = function(e) NULL)
-        if (is.null(Mmat)) {
-          eff_p_draws[t, m] <- NA_real_
-          next
-        }
-        Binv <- tryCatch(solve(Mmat), error = function(e) NULL)
-        if (is.null(Binv)) {
-          eff_p_draws[t, m] <- NA_real_
-          next
-        }
-        tmp <- Binv %*% ((IN - r * W) %*% yc - r * w * y0)
-        y_cf <- sum(a * as.numeric(tmp))
-        eff_p_draws[t, m] <- y0 - y_cf
-      }
-    }
-
-    eff_p_mean <- rowMeans(eff_p_draws, na.rm = TRUE)
-    q_p <- t(apply(
-      eff_p_draws,
-      1,
-      stats::quantile,
-      probs = c(0.025, 0.975),
-      na.rm = TRUE
-    ))
-    covered_p <- as.integer(q_p[, 1] <= tau_true & tau_true <= q_p[, 2])
-
-    ATE_p_means <- colMeans(eff_p_draws, na.rm = TRUE)
-    ATE_p_lohi <- stats::quantile(ATE_p_means, c(0.025, 0.975), na.rm = TRUE)
-    ATE_p_cov <- as.integer(
-      ATE_p_lohi[1] <= mean(tau_true) & mean(tau_true) <= ATE_p_lohi[2]
-    )
-
-    prop <- list(
-      alpha_rho_M = M,
-      per_time = data.frame(
-        t = seq_len(T1),
-        eff_mean = eff_p_mean,
-        eff_lo = q_p[, 1],
-        eff_hi = q_p[, 2],
-        covered = covered_p
-      ),
-      ATE = data.frame(
-        mean = mean(ATE_p_means, na.rm = TRUE),
-        lo = ATE_p_lohi[1],
-        hi = ATE_p_lohi[2],
-        covered = ATE_p_cov
-      )
-    )
+  Yc1_post <- matrix(NA_real_, T1, N)
+  for (tt in 1:T1) {
+    Xt <- if (K > 0) matrix(X_post[tt, , , drop = FALSE], N, K) else NULL
+    rhs <- rho * w * Y01_post[tt]
+    if (K > 0) rhs <- rhs + as.numeric(Xt %*% beta)
+    rhs <- rhs + rnorm(N, 0, sqrt(max(sigma2, 1e-12)))
+    Yc1_post[tt, ] <- as.numeric(A_post_inv %*% rhs)
   }
+
+  # 出力
+  Yc_pre  <- Yc0_all[1:T0, , drop = FALSE]
+  Y0_pre  <- Y00_all[1:T0]
+  Yc_post <- Yc1_post
+  Y0_post <- Y01_post
+
+  colnames(Yc_pre) <- colnames(Yc_post) <- paste0("u", seq_len(N))
+  names(alpha) <- colnames(Yc_pre)
+  if (K > 0 && is.null(names(beta))) names(beta) <- paste0("beta_", seq_len(K))
+
+  vec_Xc_pre  <- if (K > 0) as.numeric(aperm(X_pre,  c(1, 2, 3))) else NULL
+  vec_Xc_post <- if (K > 0) as.numeric(aperm(X_post, c(1, 2, 3))) else NULL
 
   list(
-    truth = list(alpha = dgp$truth$alpha, tau = tau_true, ATE = mean(tau_true)),
-    scm = scm,
-    bscm = bscm,
-    prop = prop
+    data = list(
+      Y0_pre  = Y0_pre,   Y0_post = Y0_post,
+      Yc_pre  = Yc_pre,   Yc_post = Yc_post,
+      Xc_pre  = vec_Xc_pre,
+      Xc_post = vec_Xc_post
+    ),
+    truth = list(
+      rho = rho, sigma2 = sigma2,
+      alpha = alpha, beta = beta,
+      # tau_post = tau_post,
+      tau_post = Y0_post - Y00_all[(T0 + 1):TT],
+      y0_cf_post = Y00_all[(T0 + 1):TT]
+    ),
+    W = W, w = w,
+    dims = list(T0 = T0, T1 = T1, N = N, K = K)
   )
 }
 
-# ----------------------------
-# 多回シミュレーションの集計（3方式）
-# ----------------------------
-summarize_many <- function(results) {
-  stopifnot(length(results) >= 1)
-  tau_true <- results[[1]]$truth$tau
-  T1 <- length(tau_true)
-  ATE_true <- results[[1]]$truth$ATE
+# =========================================================
+# 1回分のシミュレーション（SCM / BSCM / SCSPILL）
+#   - dgp が NULL の場合は dgp_args から自動生成：
+#       * grid=c(nrow,ncol) で rook W
+#       * treated で w
+#       * seed は run_one_sim の引数から dgp に伝搬
+# =========================================================
+run_one_sim <- function(
+  dgp = NULL, dgp_args = NULL,
+  M = 2000, burn = 1000,
+  step_rho = 0.02,
+  seed = NULL
+) {
+  if (is.null(dgp)) {
+    if (is.null(dgp_args)) stop("Provide either `dgp` or `dgp_args`.")
+    args <- as.list(dgp_args)
 
-  # 期別の推定値と被覆
-  mat_extract <- function(path) {
-    do.call(cbind, lapply(results, function(r) r[[path]]$per_time$eff_mean))
+    # W / w を補完
+    if (is.null(args$W)) {
+      grid <- args$grid %||% stop("dgp_args: specify `W` or `grid = c(nrow, ncol)`.")
+      args$W <- rook_W(grid[1], grid[2], normalize = TRUE)
+      args$N <- nrow(args$W)
+    } else {
+      args$N <- nrow(args$W)
+    }
+    args$w     <- args$w %||% make_w(args$N, treated = args$treated %||% 1L)
+    args$K     <- args$K %||% 0L
+    if (args$K <= 0) args$beta <- NULL
+    args$seed  <- seed
+
+    dgp <- do.call(scspill_sim_dgp, args)
   }
-  cov_extract <- function(path) {
-    do.call(cbind, lapply(results, function(r) r[[path]]$per_time$covered))
-  }
 
-  scm_eff <- mat_extract("scm")
-  bscm_eff <- mat_extract("bscm")
-  prop_eff <- mat_extract("prop")
+  T0 <- dgp$dims$T0; T1 <- dgp$dims$T1; N <- dgp$dims$N; K <- dgp$dims$K
+  W <- dgp$W; w <- dgp$w
+  Y0_pre  <- dgp$data$Y0_pre;  Yc_pre  <- dgp$data$Yc_pre
+  Y0_post <- dgp$data$Y0_post; Yc_post <- dgp$data$Yc_post
 
-  scm_cov <- cov_extract("scm")
-  bscm_cov <- cov_extract("bscm")
-  prop_cov <- cov_extract("prop")
+  # 真の TE / ATE
+  y0_cf_true <- dgp$truth$y0_cf_post
+  te_true    <- Y0_post - y0_cf_true
+  ate_true   <- mean(te_true)
 
-  # 期別の平均バイアス/RMSE/カバレッジ
-  bias_rmse_cov <- function(eff_mat, cov_mat) {
-    bias_t <- rowMeans(eff_mat - tau_true)
-    rmse_t <- sqrt(rowMeans((eff_mat - tau_true)^2))
-    cover_t <- rowMeans(cov_mat)
-    list(bias_t = bias_t, rmse_t = rmse_t, cover_t = cover_t)
-  }
-  s_scm <- bias_rmse_cov(scm_eff, scm_cov)
-  s_bscm <- bias_rmse_cov(bscm_eff, bscm_cov)
-  s_prop <- bias_rmse_cov(prop_eff, prop_cov)
+  # --- SCM（点）---
+  alpha_scm <- .scM_qp(Y0_pre, Yc_pre)
+  ycf_scm   <- as.numeric(Yc_post %*% alpha_scm)
+  te_scm    <- Y0_post - ycf_scm
+  ate_scm   <- mean(te_scm)
 
-  # ATE 集計
-  ATE_vec <- function(path) sapply(results, function(r) r[[path]]$ATE$mean)
-  ATE_cov <- function(path) sapply(results, function(r) r[[path]]$ATE$covered)
-
-  scm_ATE <- ATE_vec("scm")
-  scm_ATE_cov <- ATE_cov("scm")
-  bscm_ATE <- ATE_vec("bscm")
-  bscm_ATE_cov <- ATE_cov("bscm")
-  prop_ATE <- ATE_vec("prop")
-  prop_ATE_cov <- ATE_cov("prop")
-
-  summary_methods <- rbind(
-    data.frame(
-      method = "SCM",
-      ATE_truth = ATE_true,
-      ATE_mean_est = mean(scm_ATE),
-      ATE_bias = mean(scm_ATE - ATE_true),
-      ATE_rmse = sqrt(mean((scm_ATE - ATE_true)^2)),
-      ATE_cover95 = mean(scm_ATE_cov),
-      per_time_avg_bias = mean(s_scm$bias_t),
-      per_time_avg_rmse = mean(s_scm$rmse_t),
-      per_time_avg_cover95 = mean(s_scm$cover_t),
-      row.names = NULL
-    ),
-    data.frame(
-      method = "Bayesian SCM",
-      ATE_truth = ATE_true,
-      ATE_mean_est = mean(bscm_ATE),
-      ATE_bias = mean(bscm_ATE - ATE_true),
-      ATE_rmse = sqrt(mean((bscm_ATE - ATE_true)^2)),
-      ATE_cover95 = mean(bscm_ATE_cov),
-      per_time_avg_bias = mean(s_bscm$bias_t),
-      per_time_avg_rmse = mean(s_bscm$rmse_t),
-      per_time_avg_cover95 = mean(s_bscm$cover_t),
-      row.names = NULL
-    ),
-    data.frame(
-      method = "Proposed (SC-SPILL)",
-      ATE_truth = ATE_true,
-      ATE_mean_est = mean(prop_ATE),
-      ATE_bias = mean(prop_ATE - ATE_true),
-      ATE_rmse = sqrt(mean((prop_ATE - ATE_true)^2)),
-      ATE_cover95 = mean(prop_ATE_cov),
-      per_time_avg_bias = mean(s_prop$bias_t),
-      per_time_avg_rmse = mean(s_prop$rmse_t),
-      per_time_avg_cover95 = mean(s_prop$cover_t),
-      row.names = NULL
-    )
+  # --- BSCM（αの事後）---
+  alpha_draws <- hs_alpha_gibbs_cpp(
+    Y0_pre = Y0_pre,
+    control_outcome_pre = Yc_pre,
+    iteration = M, burn = burn, verbose = FALSE
   )
+  colnames(alpha_draws) <- colnames(Yc_pre)
+  te_bscm_mat     <- matrix(Y0_post, nrow = T1, ncol = nrow(alpha_draws)) - (Yc_post %*% t(alpha_draws))
+  te_bscm_mean    <- rowMeans(te_bscm_mat)
+  ate_bscm_draws  <- colMeans(te_bscm_mat)
+  ate_bscm_mean   <- mean(te_bscm_mean)
+  ci_ate_bscm     <- .q025q975(ate_bscm_draws)
+  cover_ate_bscm  <- as.numeric(ci_ate_bscm[1] <= ate_true && ate_true <= ci_ate_bscm[2])
+  cover_pt_bscm   <- mean(vapply(seq_len(T1), function(t) {
+    ci <- .q025q975(te_bscm_mat[t, ]); as.numeric(ci[1] <= te_true[t] && te_true[t] <= ci[2])
+  }, numeric(1)))
+
+  # --- SCSPILL（α & ρ を同期）---
+  sar <- sar_full_sampler_cpp(
+    Y0_pre = Y0_pre, Yc_pre = Yc_pre,
+    Xc_pre_ = if (K > 0) dgp$data$Xc_pre else NULL,
+    T0 = T0, N = N, K = K, p = 0,
+    w = as.numeric(w), W = W,
+    iteration = M, burn = burn,
+    step_rho = step_rho, a0 = 1.0, b0 = 1.0, verbose = FALSE
+  )
+  rho_draws <- as.numeric(sar$rho)
+
+  M_pair <- min(nrow(alpha_draws), length(rho_draws))
+  te_spill_mat <- matrix(NA_real_, nrow = T1, ncol = M_pair)
+  for (m in seq_len(M_pair)) {
+    ycf_m <- .scspill_cf_post(Y0_post, Yc_post, W, w, alpha_draws[m, ], rho_draws[m])
+    te_spill_mat[, m] <- Y0_post - ycf_m
+  }
+  te_spill_mean    <- rowMeans(te_spill_mat)
+  ate_spill_draws  <- colMeans(te_spill_mat)
+  ate_spill_mean   <- mean(te_spill_mean)
+  ci_ate_spill     <- .q025q975(ate_spill_draws)
+  cover_ate_spill  <- as.numeric(ci_ate_spill[1] <= ate_true && ate_true <= ci_ate_spill[2])
+  cover_pt_spill   <- mean(vapply(seq_len(T1), function(t) {
+    ci <- .q025q975(te_spill_mat[t, ]); as.numeric(ci[1] <= te_true[t] && te_true[t] <= ci[2])
+  }, numeric(1)))
+
+  # --- metrics（SCM の coverage は NA）---
+  effect_metrics <- function(te_hat, te_true) {
+    c(
+      bias_ate   = mean(te_hat) - mean(te_true),
+      rmse_ate   = sqrt(mean((mean(te_hat) - mean(te_true))^2)),
+      bias_point = mean(te_hat - te_true),
+      rmse_point = sqrt(mean((te_hat - te_true)^2))
+    )
+  }
+  metrics <- rbind(
+    SCM     = c(effect_metrics(te_scm,        te_true), cover95_ate = NA_real_,        cover95_point = NA_real_),
+    BSCM    = c(effect_metrics(te_bscm_mean,  te_true), cover95_ate = cover_ate_bscm,  cover95_point = cover_pt_bscm),
+    SCSPILL = c(effect_metrics(te_spill_mean, te_true), cover95_ate = cover_ate_spill, cover95_point = cover_pt_spill)
+  )
+  metrics <- as.data.frame(metrics)
+  metrics$method <- rownames(metrics); rownames(metrics) <- NULL
 
   list(
-    summary_methods = summary_methods,
-    per_time = list(
-      scm = data.frame(
-        t = seq_len(T1),
-        bias = s_scm$bias_t,
-        rmse = s_scm$rmse_t,
-        cover95 = s_scm$cover_t
-      ),
-      bscm = data.frame(
-        t = seq_len(T1),
-        bias = s_bscm$bias_t,
-        rmse = s_bscm$rmse_t,
-        cover95 = s_bscm$cover_t
-      ),
-      prop = data.frame(
-        t = seq_len(T1),
-        bias = s_prop$bias_t,
-        rmse = s_prop$rmse_t,
-        cover95 = s_prop$cover_t
-      )
-    )
+    truth = dgp$truth,
+    draws = list(
+      alpha  = alpha_draws,
+      rho    = rho_draws,
+      ate    = list(bscm = ate_bscm_draws, scspill = ate_spill_draws)
+    ),
+    effects = list(
+      true    = te_true,
+      scm     = te_scm,
+      bscm    = te_bscm_mean,
+      scspill = te_spill_mean
+    ),
+    metrics = metrics
   )
+}
+
+# =========================================================
+# Monte Carlo
+# =========================================================
+run_many_sim <- function(
+  n_sims,
+  dgp_args,            # scspill_sim_dgp に渡す引数
+  seeds = NULL,
+  ...                  # run_one_sim の引数（M, burn, step_rho など）
+) {
+  if (is.null(seeds)) {
+    seeds <- sample.int(.Machine$integer.max, n_sims)
+  } else {
+    stopifnot(length(seeds) == n_sims)
+  }
+  res <- vector("list", n_sims)
+  for (i in seq_len(n_sims)) {
+    res[[i]] <- run_one_sim(dgp = NULL, dgp_args = dgp_args, seed = seeds[i], ...)
+  }
+  res
+}
+
+summarize_many <- function(results) {
+  stopifnot(is.list(results), length(results) > 0)
+  tab <- do.call(rbind, lapply(results, function(r) r$metrics))
+  keep <- c("bias_ate","rmse_ate","bias_point","rmse_point","cover95_ate","cover95_point")
+  agg_mean <- aggregate(. ~ method, data = tab, FUN = mean, na.rm = TRUE)
+  agg_sd   <- aggregate(. ~ method, data = tab, FUN = sd,   na.rm = TRUE)
+  out <- merge(
+    agg_mean[, c("method", keep)],
+    setNames(agg_sd[, c("method", keep)], c("method", paste0(keep, "_sd"))),
+    by = "method", sort = FALSE
+  )
+  out[order(match(out$method, c("SCSPILL","BSCM","SCM"))), ]
 }

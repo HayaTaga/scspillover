@@ -11,6 +11,7 @@ returns posterior draws of weights and rho, and identified treatment/spillover e
 install.packages(c("devtools","roxygen2","testthat","rmarkdown","progress","ggplot2","Matrix"))
 devtools::document()
 devtools::build()
+devtools::load_all(".")
 devtools::check()
 ```
 

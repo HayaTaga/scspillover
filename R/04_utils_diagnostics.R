@@ -20,32 +20,151 @@ diagnostics.scspill <- function(
     stop("Currently only what='trace' is supported.")
   }
 
+  # ---------- helper diagnostics ----------
+  .safe_quant <- function(x, probs = c(0.025, 0.05, 0.5, 0.95, 0.975)) {
+    stats::quantile(
+      as.numeric(x),
+      probs = probs,
+      names = FALSE,
+      type = 7,
+      na.rm = TRUE
+    )
+  }
+  .ess_acf <- function(x, max_lag = NULL) {
+    x <- as.numeric(x)
+    x <- x[is.finite(x)]
+    n <- length(x)
+    if (n < 10) {
+      return(NA_real_)
+    }
+    if (is.null(max_lag)) {
+      max_lag <- min(1000L, n - 1L)
+    }
+    ac <- tryCatch(
+      stats::acf(x, type = "correlation", plot = FALSE, lag.max = max_lag)$acf[
+        -1
+      ],
+      error = function(e) NULL
+    )
+    if (is.null(ac)) {
+      return(NA_real_)
+    }
+    pos <- ac[ac > 0]
+    tau <- if (length(pos) == 0) 1.0 else 1.0 + 2.0 * sum(pos)
+    ess <- n / tau
+    max(1.0, min(ess, n))
+  }
+  .rhat_split <- function(x, n_splits = 2L) {
+    x <- as.numeric(x)
+    x <- x[is.finite(x)]
+    n <- length(x)
+    if (n < 20) {
+      return(NA_real_)
+    }
+    L <- floor(n / n_splits)
+    if (L < 10) {
+      return(NA_real_)
+    }
+    mat <- matrix(
+      x[seq_len(L * n_splits)],
+      nrow = L,
+      ncol = n_splits,
+      byrow = FALSE
+    )
+    chain_means <- colMeans(mat)
+    W <- mean(apply(mat, 2, stats::var))
+    B <- L * stats::var(chain_means)
+    var_hat <- ((L - 1) / L) * W + (B / L)
+    as.numeric(sqrt(var_hat / W))
+  }
+  .mcse_from_ess <- function(x, ess) {
+    x <- as.numeric(x)
+    s <- stats::sd(x, na.rm = TRUE)
+    if (!is.finite(ess) || ess <= 0) {
+      return(NA_real_)
+    }
+    s / sqrt(ess)
+  }
+  .geweke_z <- function(x, frac1 = 0.1, frac2 = 0.5) {
+    x <- as.numeric(x)
+    n <- length(x)
+    if (n < 30) {
+      return(NA_real_)
+    }
+    nA <- max(5L, floor(n * frac1))
+    nB <- max(5L, floor(n * frac2))
+    A <- x[seq_len(nA)]
+    B <- x[(n - nB + 1):n]
+    sv <- function(y) {
+      m <- length(y)
+      ac <- tryCatch(
+        stats::acf(
+          y,
+          type = "covariance",
+          plot = FALSE,
+          lag.max = min(1000, m - 1)
+        )$acf,
+        error = function(e) NULL
+      )
+      if (is.null(ac)) {
+        return(stats::var(y))
+      }
+      g0 <- ac[1]
+      if (length(ac) == 1) {
+        return(g0)
+      }
+      s <- 0
+      for (k in 2:length(ac)) {
+        if (ac[k] <= 0) {
+          break
+        }
+        w <- 1 - (k - 1) / length(ac)
+        s <- s + 2 * w * ac[k]
+      }
+      max(1e-12, g0 + s)
+    }
+    (mean(A) - mean(B)) / sqrt(sv(A) / length(A) + sv(B) / length(B))
+  }
+  .get_units_control <- function(fit, n_cols) {
+    uc <- tryCatch(fit$inputs$units$control, error = function(e) NULL)
+    if (!is.null(uc)) {
+      return(as.character(uc))
+    }
+    cn <- colnames(fit$inputs$Yc_post)
+    if (is.null(cn)) {
+      cn <- colnames(fit$inputs$Yc_pre)
+    }
+    if (!is.null(cn)) {
+      return(as.character(cn))
+    }
+    paste0("unit_", seq_len(n_cols))
+  }
+
   # ---- 収集：rho / alpha / sigma2 / tau2 / beta（存在すれば）を縦持ちで結合 ----
-  out_list <- list()
+  out_list_df <- list() # trace 用（データフレーム）
+  out_series <- list() # 診断値用（ベクトル）
 
   # rho
   if (!is.null(object$rho_draws)) {
-    out_list[["rho"]] <- data.frame(
-      iter = seq_along(object$rho_draws),
-      value = as.numeric(object$rho_draws),
+    vals <- as.numeric(object$rho_draws)
+    out_list_df[["rho"]] <- data.frame(
+      iter = seq_along(vals),
+      value = vals,
       series = "rho"
     )
+    out_series[["rho"]] <- vals
   }
 
   # alpha（上位 or 指定）
   if (!is.null(object$alpha_draws)) {
-    unit_names <- {
-      uc <- tryCatch(object$inputs$units$control, error = function(e) NULL)
-      if (!is.null(uc)) {
-        as.character(uc)
-      } else {
-        paste0("unit_", seq_len(ncol(object$alpha_draws)))
-      }
-    }
+    unit_names <- .get_units_control(object, ncol(object$alpha_draws))
     # 選抜
     if (is.null(which_alpha)) {
-      ord <- order(-abs(as.numeric(object$alpha_hat)))
-      sel <- head(ord, n = min(top_n_alpha, length(ord)))
+      ah <- tryCatch(as.numeric(object$alpha_hat), error = function(e) NULL)
+      if (is.null(ah)) {
+        ah <- colMeans(object$alpha_draws)
+      }
+      sel <- head(order(-abs(ah)), n = min(top_n_alpha, length(ah)))
     } else if (is.character(which_alpha)) {
       m <- match(which_alpha, unit_names)
       if (anyNA(m)) {
@@ -63,34 +182,36 @@ diagnostics.scspill <- function(
     } else {
       stop("'which_alpha' must be NULL, character, or numeric.")
     }
-    # ロング化
     iters <- seq_len(nrow(object$alpha_draws))
     for (j in sel) {
-      out_list[[paste0("alpha[", unit_names[j], "]")]] <- data.frame(
-        iter = iters,
-        value = as.numeric(object$alpha_draws[, j]),
-        series = paste0("alpha[", unit_names[j], "]")
-      )
+      nm <- paste0("alpha[", unit_names[j], "]")
+      vals <- as.numeric(object$alpha_draws[, j])
+      out_list_df[[nm]] <- data.frame(iter = iters, value = vals, series = nm)
+      out_series[[nm]] <- vals
     }
   }
 
-  # sigma2 / tau2（あれば sar に格納していることを想定）
+  # sigma2 / tau2
   if (!is.null(object$sar) && !is.null(object$sar$sigma2_draws)) {
-    out_list[["sigma2"]] <- data.frame(
-      iter = seq_along(object$sar$sigma2_draws),
-      value = as.numeric(object$sar$sigma2_draws),
+    vals <- as.numeric(object$sar$sigma2_draws)
+    out_list_df[["sigma2"]] <- data.frame(
+      iter = seq_along(vals),
+      value = vals,
       series = "sigma2"
     )
+    out_series[["sigma2"]] <- vals
   }
   if (!is.null(object$sar) && !is.null(object$sar$tau2_draws)) {
-    out_list[["tau2"]] <- data.frame(
-      iter = seq_along(object$sar$tau2_draws),
-      value = as.numeric(object$sar$tau2_draws),
+    vals <- as.numeric(object$sar$tau2_draws)
+    out_list_df[["tau2"]] <- data.frame(
+      iter = seq_along(vals),
+      value = vals,
       series = "tau2"
     )
+    out_series[["tau2"]] <- vals
   }
 
-  # beta（あれば; M x K を想定）
+  # beta（M x K）
   if (!is.null(object$sar) && !is.null(object$sar$beta)) {
     beta_draws <- object$sar$beta
     K <- ncol(beta_draws)
@@ -100,10 +221,8 @@ diagnostics.scspill <- function(
     }
 
     if (is.null(which_beta)) {
-      # 事後平均の |.| 大きい順に抽出
       bm <- colMeans(beta_draws)
-      selb <- order(-abs(bm))
-      selb <- head(selb, n = min(top_n_beta, length(selb)))
+      selb <- head(order(-abs(bm)), n = min(top_n_beta, length(bm)))
     } else if (is.character(which_beta)) {
       mb <- match(which_beta, beta_names)
       if (anyNA(mb)) {
@@ -122,20 +241,19 @@ diagnostics.scspill <- function(
 
     iters <- seq_len(nrow(beta_draws))
     for (k in selb) {
-      out_list[[paste0("beta[", beta_names[k], "]")]] <- data.frame(
-        iter = iters,
-        value = as.numeric(beta_draws[, k]),
-        series = paste0("beta[", beta_names[k], "]")
-      )
+      nm <- paste0("beta[", beta_names[k], "]")
+      vals <- as.numeric(beta_draws[, k])
+      out_list_df[[nm]] <- data.frame(iter = iters, value = vals, series = nm)
+      out_series[[nm]] <- vals
     }
   }
 
-  if (length(out_list) == 0L) {
+  if (length(out_list_df) == 0L) {
     stop("No traceable parameters found in object.")
   }
 
-  df <- do.call(rbind, out_list)
-
+  # ---- trace plot ----
+  df <- do.call(rbind, out_list_df)
   p <- ggplot2::ggplot(df, ggplot2::aes(iter, value)) +
     ggplot2::geom_line() +
     ggplot2::facet_wrap(~series, scales = "free_y") +
@@ -145,5 +263,40 @@ diagnostics.scspill <- function(
       y = "Value",
       title = "Trace plots (rho / alpha / sigma2 / tau2 / beta)"
     )
+
+  # ---- summary diagnostics table（属性として付与）----
+  tab <- do.call(
+    rbind,
+    lapply(names(out_series), function(nm) {
+      x <- out_series[[nm]]
+      n <- length(x)
+      qs <- .safe_quant(x)
+      ess <- .ess_acf(x)
+      mcse <- .mcse_from_ess(x, ess)
+      act <- if (is.finite(ess)) n / ess else NA_real_
+      rhat <- .rhat_split(x, n_splits = 2L)
+      gz <- .geweke_z(x)
+      data.frame(
+        parameter = nm,
+        n = n,
+        mean = mean(x),
+        sd = stats::sd(x),
+        q025 = qs[1],
+        q05 = qs[2],
+        q50 = qs[3],
+        q95 = qs[4],
+        q975 = qs[5],
+        ess = ess,
+        mcse = mcse,
+        act = act,
+        rhat_split = rhat,
+        geweke_z = gz,
+        stringsAsFactors = FALSE
+      )
+    })
+  )
+  rownames(tab) <- NULL
+  attr(p, "summary") <- tab
+
   return(p)
 }

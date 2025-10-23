@@ -38,289 +38,102 @@ fit <- sc_spillover(
   y = "cigsale", # 例: アウトカム列が "smoking_rate" の場合
   X = c("retprice"), # 共変量（列名ベクトル）
   p_factors = 1, # Appendixの因子レイヤを1つ使用
-  M = 10000,
-  burn = 5000,
-  seed = 1,
+  M = 100,
+  burn = 50,
+  seed = 20251022,
   unit_col = "state",
   time_col = "year"
 )
 
 # 推定済みオブジェクト: fit
-plot(fit) # treated effect + 95%CI
-plot(fit, type = "spill_top") # スピルオーバー上位ユニットの推移
+plot(fit, time_col = "year") # treated effect + 95%CI
+plot(fit, type = "effect", time_col = "year")
+plot(fit, type = "spill_top", top_n = 8, time_col = "year")
 plot(fit, type = "weights") # 合成ウェイトの棒グラフ
 plot(fit, type = "rho") # rho の事後分布
 plot(fit, type = "beta") # beta の事後要約（あれば）
 plot(fit, type = "trace") # rho のトレース
 
-pp_check(fit, what = "treat_last_dist")
-pp_check(fit, what = "rho_trace")
+# トレース描画（従来通り）
+p <- diagnostics.scspill(
+  fit,
+  which_alpha = NULL,
+  top_n_alpha = 6,
+  which_beta = NULL,
+  top_n_beta = 6
+)
+print(p)
 
-diagnostics(fit, what = "trace")
+# 診断表（ESS, MCSE, ACT, split-Rhat, Geweke Z など）
+diag_tab <- attr(p, "summary")
+diag_tab[order(diag_tab$ess, decreasing = TRUE), ]
 
 
 set.seed(1)
-N <- 6; K <- 2; p <- 0; T0 <- 12
-W <- matrix(0, N, N); W[row(W)==col(W)] <- 0
-# 適当に 1 近傍にエッジ、行和1に正規化
-for (i in 1:N) { j <- if (i<N) i+1 else 1; W[i,j] <- 1 }
+N <- 6L
+K <- 0L
+p <- 0L
+T0 <- 12L
+
+# Ring adjacency, row-stochastic W
+W <- matrix(0, N, N)
+diag(W) <- 0
+for (i in 1:N) {
+  j <- if (i < N) i + 1 else 1
+  W[i, j] <- 1
+}
 W <- W / rowSums(W)
-w <- rep(0, N); w[2] <- 1
 
-# 実行
-res <- scspill_geweke(M1=1500, M2=1500,
-                      dims=list(T0=T0, N=N, K=K, p=p),
-                      W=W, w=w,
-                      priors=list(a0=1, b0=1),
-                      verbose=TRUE)
+# w: unit vector selecting the 2nd control
+w <- rep(0, N)
+w[2] <- 1
 
-round(sort(abs(res$z), decreasing=TRUE), 3)
-signif(res$pval, 3)
+# Pre-treatment treated outcome Y0_pre: AR(1) with phi=0.6
+Y0_pre <- numeric(T0)
+eps <- rnorm(T0, 0, 1)
+phi <- 0.6
+Y0_pre[1] <- eps[1]
+for (t in 2:T0) {
+  Y0_pre[t] <- phi * Y0_pre[t - 1] + eps[t]
+}
 
-# data <- panel_df
-# w <- as.matrix(w_vec[, 2])
-# W <- as.matrix(W_mat[, -1])
-# unit_col <- "state"
-# time_col <- "year"
-# y <- "cigsale"
-# treated_unit <- "California"
-# X <- c("retprice")
-# treatment_dummy <- "treatment"
-# p_factors <- 1
-# M <- 1000
-# burn <- 500
-# seed <- 1
-# verbose <- TRUE
+# No regressors in this example
+Xc <- NULL
 
-# data <- data %>%
-#   mutate(
-#     treatment = ifelse((state == treated_unit) & (year >= 1988), 1, 0)
-#   )
+out <- geweke_jdt(
+  Y0_pre,
+  W,
+  w,
+  Xc = Xc,
+  p = p,
+  M1 = 10000,
+  M2 = 10000, # 推奨規模は適宜調整
+  a0 = 1,
+  b0 = 1, # sigma^2 の IG 事前
+  step_rho = 0.01, # 既存 RW-MH の提案幅
+  g_fn = robust_g_fn, # 必要に応じて差し替え可
+  verbose = TRUE
+)
 
-# treatment_dummy <- "treatment"
+out$summary # g ごとの平均・SE・Z・p 値
 
-# times <- sort(unique(data[[time_col]]))
-# treat_series <- data[
-#   data[[unit_col]] == treated_unit,
-#   c(time_col, treatment_dummy)
-# ]
-# t_start <- min(treat_series[[time_col]][
-#   treat_series[[treatment_dummy]] == 1
-# ])
-# T0 <- sum(times < t_start)
+# baseline estimation
+library(spdep)
+library(splm)
 
-# # 前処理（列名を指定）
-# prep <- scspill_prep_X(
-#   data,
-#   treated_unit = treated_unit,
-#   T0 = T0,
-#   X = X,
-#   y_col = y,
-#   unit_col = unit_col,
-#   time_col = time_col
-# )
+lw <- mat2listw(W, style = "W")
+lw
 
-# Y0_pre <- prep$Y0_pre
-# Yc_pre <- prep$Yc_pre
-# Y0_post <- prep$Y0_post
-# Yc_post <- prep$Yc_post
-# Xc_pre <- prep$Xc_pre
-# N <- ncol(Yc_pre)
-# T1 <- nrow(Yc_post)
+df_long <- panel_df %>% filter(state_id != 0)
 
-# # (i) α推定（horseshoe）
-# hs <- hs_alpha_gibbs(
-#   y = Y0_pre,
-#   X = Yc_pre,
-#   M = M,
-#   burn = burn,
-#   verbose = verbose
-# )
-# alpha_draws <- hs$alpha
-# alpha_hat <- colMeans(alpha_draws)
-
-# sar <- sar_gibbs_sampler(
-#   Y0_pre = Y0_pre,
-#   Yc_pre = Yc_pre,
-#   Xc_pre = Xc_pre,
-#   W = W,
-#   w = w,
-#   M = M,
-#   burn = burn,
-#   verbose = verbose,
-#   p_factors = p_factors
-# )
-# rho_draws <- sar$rho
-# rho_hat <- mean(rho_draws)
-
-# cred <- 0.95
-
-# T1 <- length(Y0_post)
-# N <- ncol(Yc_post)
-# M <- nrow(alpha_draws)
-# Aeff <- array(NA_real_, dim = c(T1, M)) # treatment effects per draw
-# Spill <- array(NA_real_, dim = c(T1, N, M)) # spillovers per draw
-
-# IN <- diag(N)
-
-# m <- 1
-# a <- as.matrix(alpha_draws[m, ])
-# r <- rho_draws[m]
-# Ainv <- solve(IN - r * (w %*% t(a) + W))
-# B <- (IN - r * W)
-# for (t in 1:T1) {
-#   yc <- Yc_post[t, ]
-#   y0 <- Y0_post[t]
-#   tmp <- Ainv %*% (B %*% yc - r * w * y0)
-#   # (5) treatment
-#   Aeff[t, m] <- y0 - as.numeric(crossprod(a, tmp))
-#   # (6) spillovers
-#   Spill[t, , m] <- yc - as.vector(tmp)
-# }
-# M <- 2000
-# burn <- 1000
-# verbose <- TRUE
-# p_factors <- 1
-# phi_gamma <- 0.7
-# sig2_g_init <- 1.0
-# sig2_e_init <- 1.0
-# step_rho <- 0.05
-
-# T0 <- nrow(Yc_pre)
-# N <- ncol(Yc_pre)
-# K <- if (is.null(Xc_pre)) 0 else dim(Xc_pre)[3]
-# p <- max(0, p_factors)
-
-# rho <- 0
-# sig2_e <- sig2_e_init
-# sig2_g <- sig2_g_init
-# Eta <- if (p > 0) matrix(0, N, p) else matrix(0, N, 0)
-# gamma <- if (p > 0) matrix(0, p, T0) else matrix(0, 0, T0)
-# beta_state <- if (K > 0) hs_beta_init(K) else NULL
-
-# Mtot <- M + burn
-# acc <- 0L
-# rho_draws <- numeric(M)
-# beta_draws <- if (K > 0) matrix(NA_real_, M, K) else NULL
-# eta_draws <- if (p > 0) array(NA_real_, c(N, p, M)) else NULL
-# gam_draws <- if (p > 0) array(NA_real_, c(p, T0, M)) else NULL
-# sig2e_draws <- numeric(M)
-
-# pb <- if (verbose) {
-#   progress::progress_bar$new(total = Mtot, clear = FALSE)
-# } else {
-#   NULL
-# }
-
-# it <- 1
-
-# if (verbose) {
-#   pb$tick()
-# }
-# A <- diag(N) - rho * W
-# R_list <- vector("list", T0)
-
-# library(Matrix)
-
-# t <- 1
-# yc <- Matrix(as.numeric(Yc_pre[t, ]))
-# Xt <- Matrix(
-#   matrix(as.numeric(Xc_pre[t, , , drop = FALSE]), ncol = K),
-#   sparse = TRUE
-# )
-# R_list[[t]] <- as.vector(A %*% yc - rho * w * Y0_pre[t] - xterm)
-
-# for (t in 1:T0) {
-#   yc <- as.matrix(Yc_pre[t, ])
-#   Xt <- Matrix(
-#     matrix(as.numeric(Xc_pre[t, , , drop = FALSE]), ncol = K),
-#     sparse = TRUE
-#   )
-#   b <- Matrix(matrix(beta_state$beta, ncol = 1), sparse = TRUE)
-#   xterm <- if (K > 0) Xt %*% b else rep(0, N)
-#   R_list[[t]] <- as.vector(A %*% yc - rho * w * Y0_pre[t] - xterm)
-# }
-
-# gamma <- ffbs_ar1(
-#   R_list = R_list,
-#   Eta = Eta,
-#   phi = phi_gamma,
-#   sig2_g = sig2_g,
-#   sig2_e = sig2_e
-# )
-
-# R_list_eta <- vector("list", T0)
-# for (t in 1:T0) {
-#   R_list_eta[[t]] <- R_list[[t]] + as.vector(Eta %*% gamma[, t])
-# }
-# Sigma_eta <- diag(10, p)
-# Eta <- update_eta(
-#   R_list = R_list_eta,
-#   gamma = gamma,
-#   Sigma_eta = Sigma_eta,
-#   sig2_e = sig2_e
-# )
-
-# y_stack <- numeric(T0 * N)
-# X_stack <- matrix(0, T0 * N, K)
-# for (t in 1:T0) {
-#   idx <- ((t - 1) * N + 1):(t * N)
-#   y_stack[idx] <- if (p > 0) {
-#     R_list[[t]] + as.vector(Eta %*% gamma[, t])
-#   } else {
-#     R_list[[t]]
-#   }
-#   X_stack[idx, ] <- Xc_pre[t, , ]
-# }
-# beta_state <- hs_beta_update(y = y_stack, X = X_stack, state = beta_state)
-
-# mh <- rho_mh_step(
-#   rho_cur = rho,
-#   Yc_pre = Yc_pre,
-#   Y0_pre = Y0_pre,
-#   Xc_pre = Xc_pre,
-#   beta = if (K > 0) beta_state$beta else rep(0, K),
-#   W = W,
-#   w = w,
-#   Eta = if (p > 0) Eta else matrix(0, N, 0),
-#   gamma = if (p > 0) gamma else matrix(0, 0, T0),
-#   sig2_e = sig2_e,
-#   step = step_rho
-# )
-# rho <- mh$rho
-# if (mh$accept && it > burn) {
-#   acc <- acc + 1L
-# }
-
-# ss <- 0
-# for (t in 1:T0) {
-#   u <- if (p > 0) {
-#     R_list[[t]] - as.vector(Eta %*% gamma[, t])
-#   } else {
-#     R_list[[t]]
-#   }
-#   ss <- ss + sum(u^2)
-# }
-# shape <- (N * T0) / 2 + 0.1
-# rate <- ss / 2 + 0.1
-# sig2_e <- 1 / rgamma(1, shape = shape, rate = rate)
-# if (it > burn) {
-#   k <- it - burn
-#   rho_draws[k] <- rho
-#   if (K > 0) {
-#     beta_draws[k, ] <- beta_state$beta
-#   }
-#   if (p > 0) {
-#     eta_draws[,, k] <- Eta
-#     gam_draws[,, k] <- gamma
-#   }
-#   sig2e_draws[k] <- sig2_e
-# }
-# list(
-#   rho = rho_draws,
-#   beta = beta_draws,
-#   Eta = eta_draws,
-#   gamma = gam_draws,
-#   sigma2_e = sig2e_draws,
-#   acc_rate = acc / max(1, M)
-# )
+sar_pool <- spml(
+  cigsale ~ retprice,
+  data = df_long,
+  index = c("state_id", "year"),
+  listw = lw,
+  model = "pooling",
+  lag = TRUE,
+  spatial.error = "none",
+  method = "eigne"
+)
+summary(sar_pool)

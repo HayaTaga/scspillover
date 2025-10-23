@@ -7,10 +7,9 @@ using namespace arma;
 // =========================== Utilities ===========================
 inline double rinvgamma(double shape, double scale) { return 1.0 / R::rgamma(shape, 1 / scale); }
 
-inline double logdet_signed(const arma::mat& A) {
+inline double logdet(const arma::mat& A) {
   double sign=0.0, val=0.0;
   arma::log_det(val, sign, A);
-  if (sign <= 0.0 || !arma::is_finite(val)) return -std::numeric_limits<double>::infinity();
   return val;
 }
 
@@ -230,7 +229,7 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // T0
                                 int T0, int N, int K, int p,
                                 const arma::vec& w,         // N  (adj_vec)
                                 const arma::mat& W,         // N x N (adj_mat)
-                                int M, int burn,
+                                int iteration, int burn,
                                 double step_rho = 0.01,
                                 double c_beta_ridge = 0.0,   // 未使用(HSに切替)。0固定可
                                 double c_lambda_ridge = 0.0, // 未使用(階層化に切替)。0固定可
@@ -238,6 +237,8 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // T0
                                 bool verbose=false) {
 
   Rcpp::RNGScope scope;
+
+  const int M = std::max(0, iteration - burn);
 
   // --- data
   arma::vec Y0 = Y0_pre;              // T0
@@ -302,7 +303,7 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // T0
   auto ll_rho = [&](double r)->double {
     if (std::abs(r) >= bnd) return -std::numeric_limits<double>::infinity();
     arma::mat Mmat = I_N - r * A;
-    double ldet = logdet_signed(Mmat);
+    double ldet = logdet(Mmat);
     if (!std::isfinite(ldet)) return -std::numeric_limits<double>::infinity();
     double ss = 0.0;
     for (int t=0;t<T0;++t) {
@@ -312,11 +313,6 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // T0
       arma::vec u = Mmat * Yc.row(t).t() - mu;
       ss += arma::dot(u,u);
     }
-////////////////////////////////////////////////////////////////////////
-// NOTE: Remove later
-    Rcpp::Rcout << "[sigma2] shape=" << (0.5*(T0*N) + a0)
-            << "  scale=" << (0.5*ss + b0) << "  (note: InvGamma shape/scale)\n";
-////////////////////////////////////////////////////////////////////////
     return T0 * ldet - 0.5 * (N*T0) * std::log(s2) - 0.5 * ss / s2;
   };
 
@@ -434,15 +430,17 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // T0
       ss += arma::dot(u,u);
     }
     double shape = 1.0 + 0.5 * (T0 * N);
-    double rate  = 1.0/clip1(nu_sigma2) + 0.5 * ss;      // Julia の式に準拠（+ 1/nu_sigma2）
+    double rate  = 1.0/clip1(nu_sigma2) + 0.5 * ss;
+    // Rcpp::Rcout << "[sigma2] rate=" << rate << "\n";
     s2 = rinvgamma(shape, rate);
+    // Rcpp::Rcout << "[sigma2] draw=" << s2 << "\n";
     nu_sigma2 = rinvgamma(1.0, 1.0/clip1(s2) + 1.0/100.0);
 
     // ===== (5) rho | rest  （RW-MH, lam=rho） =====
     auto ll = [&](double r)->double {
       if (std::abs(r) >= bnd) return -std::numeric_limits<double>::infinity();
       arma::mat Mmat = I_N - r * A;
-      double ldet = logdet_signed(Mmat);
+      double ldet = logdet(Mmat);
       if (!std::isfinite(ldet)) return -std::numeric_limits<double>::infinity();
       double ss2 = 0.0;
       for (int t=0; t<T0; ++t) {
@@ -460,7 +458,7 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // T0
     if (std::log(R::runif(0.0,1.0)) < (lprp - lcur)) { rho = prop; if (it>=burn) acc++; }
 
     // ===== store after burn =====
-    if (it >= burn) {
+    if (it > burn) {
       int m = it - burn;
       rho_draws[m] = rho;
       s2_draws[m]  = s2;
@@ -482,4 +480,272 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // T0
     _["F"]       = F_draws,         // = Gamma
     _["acc_rate"]= acc / std::max(1, M)
   );
+}
+
+
+// [[Rcpp::export]]
+Rcpp::List sar_full_one_step_cpp(const arma::vec& Y0_pre,    // T0
+                                 const arma::mat& Yc_pre,    // T0 x N
+                                 Rcpp::Nullable<Rcpp::NumericVector> Xc_pre_, // (T0*N*K)
+                                 int T0, int N, int K, int p,
+                                 const arma::vec& w,         // N
+                                 const arma::mat& W,         // N x N
+                                 Rcpp::List state,           // 現在の状態（下で仕様化）
+                                 double step_rho = 0.01,
+                                 double a0 = 1.0, double b0 = 1.0,
+                                 bool verbose=false) {
+  Rcpp::RNGScope scope;
+
+  // ---- unpack state (必須ブロック) ----
+  double rho    = Rcpp::as<double>(state["rho"]);
+  double s2     = Rcpp::as<double>(state["sigma2"]);
+
+  arma::vec beta = (K>0 && state.containsElementNamed("beta")) ? 
+                    Rcpp::as<arma::vec>(state["beta"]) : arma::vec();
+
+  arma::mat Eta   = (p>0 && state.containsElementNamed("Lambda")) ? 
+                    Rcpp::as<arma::mat>(state["Lambda"]) : arma::mat();
+
+  arma::mat Gamma = (p>0 && state.containsElementNamed("F")) ? 
+                    Rcpp::as<arma::mat>(state["F"]) : arma::mat();
+
+  // ---- unpack auxiliaries (存在しなければデフォルト) ----
+  arma::vec sig2_b0   = (K>0 && state.containsElementNamed("sig2_b0"))  ? Rcpp::as<arma::vec>(state["sig2_b0"])  : arma::ones<arma::vec>(K);
+  arma::vec nu_sig_b0 = (K>0 && state.containsElementNamed("nu_sig_b0"))? Rcpp::as<arma::vec>(state["nu_sig_b0"]): arma::ones<arma::vec>(K);
+  double tau2_b0      = (K>0 && state.containsElementNamed("tau2_b0"))  ? Rcpp::as<double>(state["tau2_b0"])     : 1.0;
+  double nu_tau_b0    = (K>0 && state.containsElementNamed("nu_tau_b0"))? Rcpp::as<double>(state["nu_tau_b0"])   : 1.0;
+
+  double nu_sigma2    = state.containsElementNamed("nu_sigma2") ? Rcpp::as<double>(state["nu_sigma2"]) : 1.0;
+
+  double phi_g        = (p>0 && state.containsElementNamed("phi_g"))     ? Rcpp::as<double>(state["phi_g"])     : 0.0;
+  double s2_g         = (p>0 && state.containsElementNamed("s2_g"))      ? Rcpp::as<double>(state["s2_g"])      : 1.0;
+  double nu_s2_g      = (p>0 && state.containsElementNamed("nu_s2_g"))   ? Rcpp::as<double>(state["nu_s2_g"])   : 1.0;
+
+  arma::vec omega_k   = (p>0 && state.containsElementNamed("omega_k"))   ? Rcpp::as<arma::vec>(state["omega_k"]) : arma::ones<arma::vec>(p);
+  arma::vec nu_omega_k= (p>0 && state.containsElementNamed("nu_omega_k"))? Rcpp::as<arma::vec>(state["nu_omega_k"]) : arma::ones<arma::vec>(p);
+  double s2_eta       = (p>0 && state.containsElementNamed("s2_eta"))    ? Rcpp::as<double>(state["s2_eta"])    : 1.0;
+  double nu_s2_eta    = (p>0 && state.containsElementNamed("nu_s2_eta")) ? Rcpp::as<double>(state["nu_s2_eta"]) : 1.0;
+
+  // ---- X のアクセサ ----
+  const bool useX = (K > 0) && Xc_pre_.isNotNull();
+  Rcpp::NumericVector Xvec;
+  if (useX) Xvec = Xc_pre_.get();
+  auto X_get_row = [&](int t)->arma::mat {
+    arma::mat Xt(N, K, arma::fill::zeros);
+    if (!useX) return Xt;
+    for (int i=0;i<N;++i) {
+      for (int k=0;k<K;++k) {
+        int idx = (t * N + i) * K + k;
+        Xt(i,k) = Xvec[idx];
+      }
+    }
+    return Xt;
+  };
+
+  // ---- 便利な定数など ----
+  arma::vec Y0 = Y0_pre;
+  arma::mat Yc = Yc_pre;
+  arma::vec a  = w;
+  arma::mat A  = W;
+
+  arma::mat I_N = arma::eye(N,N);
+  arma::mat I_K = (K>0 ? arma::eye(K,K) : arma::mat());
+  arma::mat I_p = (p>0 ? arma::eye(p,p) : arma::mat());
+
+  // ---- spectral bound for rho ----
+  arma::cx_vec evals = arma::eig_gen(A);
+  double maxabs = 0.0;
+  for (arma::uword i=0;i<evals.n_elem;++i) maxabs = std::max(maxabs, std::abs(evals[i]));
+  double bnd = 0.95 / std::max(1.0, maxabs);
+
+  // ============================================================
+  //  (1) gamma_t | rest  （p>0 の場合）
+  // ============================================================
+  if (p>0) {
+    arma::mat EtE = Eta.t() * Eta;                      // p x p
+    arma::mat Vg  = arma::inv_sympd( EtE / s2 + I_p / s2_g );
+    arma::mat Lg  = arma::chol(Vg, "lower");
+    for (int t=0; t<T0; ++t) {
+      arma::vec r = (I_N - rho*A) * Yc.row(t).t() - rho * a * Y0[t];
+      if (useX) r -= X_get_row(t) * beta;
+      arma::vec mg = Vg * (Eta.t() * r / s2);
+      arma::vec z  = arma::randn<arma::vec>(p);
+      Gamma.col(t) = mg + Lg * z;
+    }
+    // AR(1) hyper: phi_g (truncNorm), s2_g (IG), nu_s2_g (IG)
+    double den = 0.0, num = 0.0;
+    for (int t=0; t<T0; ++t) {
+      arma::vec gl = (t==0) ? arma::vec(p, arma::fill::zeros) : arma::vec(Gamma.col(t-1));
+      den += arma::dot(gl, gl);
+      num += arma::dot(gl, Gamma.col(t));
+    }
+    double mean_phi = (den>0? num/den : 0.0);
+    double var_phi  = (den>0? s2_g/den : 1.0);
+    double cand;
+    do { cand = R::rnorm(mean_phi, std::sqrt(var_phi)); } while (std::abs(cand) > 1.0);
+    phi_g = cand;
+
+    double sc = 0.0;
+    for (int t=0; t<T0; ++t) {
+      arma::vec gl = (t==0) ? arma::vec(p, arma::fill::zeros) : arma::vec(Gamma.col(t-1));
+      arma::vec diff = Gamma.col(t) - phi_g * gl;
+      sc += 0.5 * arma::dot(diff, diff);
+    }
+    s2_g     = rinvgamma(0.5 + 0.5 * p * T0, sc + 1.0/std::max(nu_s2_g, 1e-12));
+    nu_s2_g  = rinvgamma(1.0, 1.0/std::max(s2_g,1e-12) + 1.0/100.0);
+  }
+
+  // ============================================================
+  //  (2) Eta | rest  （p>0 の場合）
+  // ============================================================
+  if (p>0) {
+    arma::mat GtG = Gamma * Gamma.t();                    // p x p
+    arma::mat Domega = arma::diagmat(omega_k);            // p x p
+    arma::mat Vrow = arma::inv_sympd( GtG / s2 + Domega / std::max(s2_eta,1e-12) );
+    arma::mat Lrow = arma::chol(Vrow, "lower");
+    for (int i=0; i<N; ++i) {
+      arma::vec rhs = arma::zeros<arma::vec>(p);
+      for (int t=0; t<T0; ++t) {
+        arma::vec r = (I_N - rho*A) * Yc.row(t).t() - rho * a * Y0[t];
+        if (useX) r -= X_get_row(t) * beta;
+        rhs += Gamma.col(t) * r(i);
+      }
+      arma::vec m = Vrow * (rhs / s2);
+      arma::vec z = arma::randn<arma::vec>(p);
+      Eta.row(i) = (m + Lrow * z).t();
+    }
+    double sc = 0.0;
+    for (int i=0;i<N;++i) {
+      arma::vec ei = Eta.row(i).t();
+      sc += arma::dot(ei, Domega * ei);
+    }
+    s2_eta    = rinvgamma(0.5 + 0.5 * p * N, 0.5*sc + 1.0/std::max(nu_s2_eta,1e-12));
+    nu_s2_eta = rinvgamma(1.0, 1.0/std::max(s2_eta,1e-12) + 1.0/100.0);
+    for (int k=0;k<p;++k) {
+      double tmp=0.0; for (int i=0;i<N;++i) tmp += 0.5 * Eta(i,k)*Eta(i,k) / std::max(s2_eta,1e-12);
+      double rate_ok = 1.0/std::max(nu_omega_k(k),1e-12) + tmp;
+      omega_k(k)     = rinvgamma(0.5*(N+1.0), rate_ok);
+      nu_omega_k(k)  = rinvgamma(1.0, 1.0 + 1.0/std::max(omega_k(k),1e-12));
+    }
+  }
+
+  // ============================================================
+  //  (3) beta | rest  （K>0 の場合; Horseshoe 補助も更新）
+  // ============================================================
+  if (useX) {
+    arma::mat Ab = arma::zeros<arma::mat>(K,K);
+    arma::vec Bb = arma::zeros<arma::vec>(K);
+    for (int t=0; t<T0; ++t) {
+      arma::mat Xt = X_get_row(t);
+      Ab += Xt.t() * Xt;
+      arma::vec Btmp = (I_N - rho*A) * Yc.row(t).t() - rho * a * Y0[t];
+      if (p>0) Btmp -= Eta * Gamma.col(t);
+      Bb += Xt.t() * Btmp;
+    }
+    Ab.diag() += std::max(s2,1e-12) * (1.0 / arma::clamp(sig2_b0, 1e-12, 1e12));
+    arma::mat Ainv = arma::inv_sympd(Ab);
+    arma::vec m    = Ainv * Bb;
+    arma::mat S    = std::max(s2,1e-12) * Ainv;
+    beta           = arma::mvnrnd(m, 0.5*(S+S.t()), 1);
+
+    // HS 補助を更新（Makalic–Schmidt）
+    for (int j=0;j<K;++j) {
+      double rate_l = 0.5 * beta(j)*beta(j) + 1.0/std::max(nu_sig_b0(j),1e-12);
+      sig2_b0(j)    = rinvgamma(1.0, rate_l);
+      double rate_nu= 1.0/std::max(sig2_b0(j),1e-12) + 1.0/std::max(tau2_b0,1e-12);
+      nu_sig_b0(j)  = rinvgamma(1.0, rate_nu);
+    }
+    double sum_inv_nu = 0.0; for (int j=0;j<K;++j) sum_inv_nu += 1.0/std::max(nu_sig_b0(j),1e-12);
+    tau2_b0    = rinvgamma(1.0, 1.0/std::max(nu_tau_b0,1e-12) + sum_inv_nu);
+    nu_tau_b0  = rinvgamma(1.0, 1.0/std::max(tau2_b0,1e-12) + 1.0/std::max(s2,1e-12));
+  }
+
+  // ============================================================
+  //  (4) sigma^2 | rest  （nu_sigma2 層も更新）
+  // ============================================================
+  double ss = 0.0;
+  for (int t=0; t<T0; ++t) {
+    arma::vec mu = rho * a * Y0[t];
+    if (useX) mu += X_get_row(t) * beta;
+    if (p>0)  mu += Eta * Gamma.col(t);
+    arma::vec u = (I_N - rho*A) * Yc.row(t).t() - mu;
+    ss += arma::dot(u,u);
+  }
+  double shape = a0 + 0.5 * (T0 * N);
+  double rate  = 1.0/std::max(nu_sigma2,1e-12) + 0.5 * ss;
+  s2 = rinvgamma(shape, rate);
+  nu_sigma2 = rinvgamma(1.0, 1.0/std::max(s2,1e-12) + 1.0/100.0);
+
+  // ============================================================
+  //  (5) rho | rest  （RW-MH）
+  // ============================================================
+  auto ll = [&](double r)->double {
+    if (std::abs(r) >= bnd) return -std::numeric_limits<double>::infinity();
+    arma::mat Mmat = I_N - r * A;
+    double ldet = logdet(Mmat);
+    if (!std::isfinite(ldet)) return -std::numeric_limits<double>::infinity();
+    double ss2 = 0.0;
+    for (int t=0; t<T0; ++t) {
+      arma::vec mu = r * a * Y0[t];
+      if (useX) mu += X_get_row(t) * beta;
+      if (p>0)  mu += Eta * Gamma.col(t);
+      arma::vec u = Mmat * Yc.row(t).t() - mu;
+      ss2 += arma::dot(u,u);
+    }
+    return T0 * ldet - 0.5 * (N*T0) * std::log(s2) - 0.5 * ss2 / s2;
+  };
+  double prop = R::rnorm(rho, step_rho);
+  double lcur = ll(rho);
+  double lprp = ll(prop);
+  bool accepted = false;
+  if (std::log(R::runif(0.0,1.0)) < (lprp - lcur)) { rho = prop; accepted = true; }
+
+  // ---- return updated state ----
+  Rcpp::List out;
+
+  // 必須フィールド
+  out["rho"]      = rho;
+  out["sigma2"]   = s2;
+  out["acc_rho"]  = accepted;
+
+  // beta ブロック（K 次元）
+  if (K > 0) {
+    out["beta"]      = Rcpp::wrap(beta);
+    out["sig2_b0"]   = Rcpp::wrap(sig2_b0);
+    out["nu_sig_b0"] = Rcpp::wrap(nu_sig_b0);
+  } else {
+    out["beta"]      = Rcpp::NumericVector(0);
+    out["sig2_b0"]   = Rcpp::NumericVector(0);
+    out["nu_sig_b0"] = Rcpp::NumericVector(0);
+  }
+  out["tau2_b0"]   = tau2_b0;
+  out["nu_tau_b0"] = nu_tau_b0;
+
+  // sigma^2 のハイパー
+  out["nu_sigma2"] = nu_sigma2;
+
+  // 因子・荷重ブロック（p 次元）
+  if (p > 0) {
+    out["Lambda"]     = Rcpp::wrap(Eta);     // N x p
+    out["F"]          = Rcpp::wrap(Gamma);   // p x T0
+    out["phi_g"]      = phi_g;
+    out["s2_g"]       = s2_g;
+    out["nu_s2_g"]    = nu_s2_g;
+    out["omega_k"]    = Rcpp::wrap(omega_k);
+    out["nu_omega_k"] = Rcpp::wrap(nu_omega_k);
+    out["s2_eta"]     = s2_eta;
+    out["nu_s2_eta"]  = nu_s2_eta;
+  } else {
+    out["Lambda"]     = Rcpp::NumericMatrix(N, 0);
+    out["F"]          = Rcpp::NumericMatrix(0, T0);
+    out["phi_g"]      = 0.0;
+    out["s2_g"]       = 1.0;
+    out["nu_s2_g"]    = 1.0;
+    out["omega_k"]    = Rcpp::NumericVector(0);
+    out["nu_omega_k"] = Rcpp::NumericVector(0);
+    out["s2_eta"]     = 1.0;
+    out["nu_s2_eta"]  = 1.0;
+  }
+
+  return out;
 }

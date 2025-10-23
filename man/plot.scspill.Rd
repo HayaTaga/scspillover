@@ -9,6 +9,7 @@
   type = c("full", "effect", "spill_top", "weights", "rho", "beta", "trace"),
   top_n = 8,
   cred = 0.95,
+  time_col = NULL,
   ...
 )
 }
@@ -21,6 +22,8 @@
 \item{top_n}{spill_top の表示ユニット数}
 
 \item{cred}{信用水準（反事実リボン）}
+
+\item{time_col}{data_pre / data_post にある横軸列名（例 "year"）}
 
 \item{...}{予備}
 }

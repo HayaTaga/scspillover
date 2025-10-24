@@ -38,8 +38,8 @@ fit <- sc_spillover(
   y = "cigsale", # 例: アウトカム列が "smoking_rate" の場合
   X = c("retprice"), # 共変量（列名ベクトル）
   p_factors = 1, # Appendixの因子レイヤを1つ使用
-  M = 100,
-  burn = 50,
+  M = 2000,
+  burn = 500,
   seed = 20251022,
   unit_col = "state",
   time_col = "year"

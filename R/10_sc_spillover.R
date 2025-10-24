@@ -1,8 +1,8 @@
-#' Synthetic Control with Spillovers (Bayesian, compact)
+#' Synthetic Control with Spillovers (Bayesian, joint MCMC)
 #'
 #' @param data long panel with columns unit, time, y (+ optional covariates)
 #' @param treated_unit treated unit name
-#' @param T0 number of pre-treatment periods
+#' @param T0 number of pre-treatment periods (if NULL, inferred from treatment start)
 #' @param w length-N vector (controls->treated)
 #' @param W N x N row-normalized spatial weight among controls
 #' @param X NULL, character vector of covariate colnames in `data`, or matrix with nrow = nrow(data)
@@ -24,7 +24,9 @@ sc_spillover <- function(
      y = "y",
      unit_col = "unit",
      time_col = "time",
-     treatment_dummy
+     treatment_dummy,
+     step_rho = 0.05,
+     step_alpha = 0.05
 ) {
      stopifnot(is.data.frame(data))
      if (!is.character(y)) {
@@ -50,7 +52,7 @@ sc_spillover <- function(
      t_start <- min(treat_series[[time_col]][
           treat_series[[treatment_dummy]] == 1
      ])
-     T0 <- sum(times < t_start)
+     T0 <- if (is.null(T0)) sum(times < t_start) else as.integer(T0)
 
      # 前処理（列名を指定）
      prep <- scspill_prep_X(
@@ -63,6 +65,7 @@ sc_spillover <- function(
           time_col = time_col
      )
 
+     # 正規化（ゼロ割り回避ロバスト）
      w <- row_normalize(w)
      W <- row_normalize(W)
 
@@ -74,36 +77,9 @@ sc_spillover <- function(
      N <- ncol(Yc_pre)
      T1 <- nrow(Yc_post)
 
-     # (i) α推定（horseshoe）
-     # hs <- hs_alpha_gibbs(
-     #      y = Y0_pre,
-     #      X = Yc_pre,
-     #      M = M,
-     #      burn = burn,
-     #      verbose = verbose
-     # )
-     hs <- hs_alpha_gibbs(
-          y = Y0_pre,
-          X = Yc_pre,
-          M = M,
-          burn = burn,
-          verbose = verbose
-     )
-     alpha_draws <- hs$alpha
-     alpha_hat <- colMeans(alpha_draws)
-
-     # (ii) SAR推定（ρ, β）
-     # sar <- sar_gibbs_sampler(
-     #      Y0_pre = Y0_pre,
-     #      Yc_pre = Yc_pre,
-     #      Xc_pre = Xc_pre,
-     #      W = W,
-     #      w = w,
-     #      M = M,
-     #      burn = burn,
-     #      verbose = verbose,
-     #      p_factors = p_factors
-     # )
+     # ================================
+     #  共同サンプラー（rho, alpha を同時推定）
+     # ================================
      sar <- sar_gibbs_sampler(
           Y0_pre = Y0_pre,
           Yc_pre = Yc_pre,
@@ -113,12 +89,19 @@ sc_spillover <- function(
           M = M,
           burn = burn,
           verbose = verbose,
-          p_factors = p_factors
+          p_factors = p_factors,
+          step_rho = step_rho,
+          step_alpha = step_alpha
      )
-     rho_draws <- sar$rho
-     rho_hat <- mean(rho_draws)
 
-     # (iii) 効果算出（式(5)(6)）
+     rho_draws <- sar$rho # length M
+     alpha_draws <- sar$alpha # M x N
+     rho_hat <- mean(rho_draws)
+     alpha_hat <- colMeans(alpha_draws)
+
+     # ================================
+     #  事後効果（式 (5)(6) に基づく）
+     # ================================
      eff <- posterior_effects(
           Y0_post = Y0_post,
           Yc_post = Yc_post,
@@ -128,29 +111,6 @@ sc_spillover <- function(
           W = W
      )
 
-     # structure(
-     #      list(
-     #           alpha_draws = alpha_draws,
-     #           alpha_hat = alpha_hat,
-     #           rho_draws = rho_draws,
-     #           rho_hat = rho_hat,
-     #           effects = eff,
-     #           sar = sar,
-     #           inputs = list(
-     #                units = prep$units,
-     #                times = prep$times,
-     #                T0 = T0,
-     #                N = N,
-     #                T1 = T1,
-     #                X_used = !is.null(Xc_pre),
-     #                p_factors = p_factors,
-     #                y_col = y,
-     #                unit_col = unit_col,
-     #                time_col = time_col
-     #           )
-     #      ),
-     #      class = "scspill"
-     # )
      inputs <- list(
           Y0_pre = Y0_pre,
           Y0_post = Y0_post,
@@ -163,46 +123,17 @@ sc_spillover <- function(
           W = as.matrix(W)
      )
 
-     structure(list(
-          alpha_draws = alpha_draws,
-          rho_draws = rho_draws,
-          alpha_hat = alpha_hat,
-          rho_hat = rho_hat,
-          effects = eff,
-          inputs = inputs,
-          sar = sar,
-          T0 = T0,
-          hs=hs,
-          sar=sar
+     structure(
+          list(
+               alpha_draws = alpha_draws,
+               rho_draws = rho_draws,
+               alpha_hat = alpha_hat,
+               rho_hat = rho_hat,
+               effects = eff,
+               inputs = inputs,
+               sar = sar,
+               T0 = T0
           ),
           class = "scspill"
      )
-}
-
-
-row_normalize <- function(x, margin = 1, tol = 1e-12) {
-     if (is.null(x)) {
-          return(NULL)
-     }
-     if (is.vector(x)) {
-          s <- sum(x, na.rm = TRUE)
-          if (abs(s) < tol) {
-               return(rep(0, length(x)))
-          }
-          return(x / s)
-     }
-     if (is.matrix(x)) {
-          if (margin == 1) {
-               row_sums <- rowSums(x, na.rm = TRUE)
-               row_sums[row_sums < tol] <- 1
-               return(x / row_sums)
-          } else if (margin == 2) {
-               col_sums <- colSums(x, na.rm = TRUE)
-               col_sums[col_sums < tol] <- 1
-               return(t(t(x) / col_sums))
-          } else {
-               stop("margin must be 1 (rows) or 2 (columns)")
-          }
-     }
-     stop("x must be numeric vector or matrix")
 }

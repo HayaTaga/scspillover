@@ -137,3 +137,31 @@ sc_spillover <- function(
           class = "scspill"
      )
 }
+
+row_normalize <- function(W, tol = 1e-12, zero_policy = c("keep","uniform0")) {
+  zero_policy <- match.arg(zero_policy)
+  stopifnot(is.matrix(W), is.numeric(W))
+  W <- as.matrix(W)
+  # 対角を0に（自己重みは使わない前提）
+  diag(W) <- 0
+  # 負の値があれば警告
+  if (any(W < -tol, na.rm = TRUE)) warning("W has negative entries.")
+  # NAは0として扱う
+  W[is.na(W)] <- 0
+  rs <- rowSums(W)
+  # 0除算回避
+  nz <- rs > tol
+  W[nz, ] <- W[nz, , drop = FALSE] / rs[nz]
+  # ゼロ行の扱い
+  if (any(!nz)) {
+    if (zero_policy == "uniform0") {
+      # ゼロ行を一様(=0)のまま（既に0なので何もしない）
+      # 何もしない
+      NULL
+    } else {
+      # keep: 何もしない（同じ）
+      NULL
+    }
+  }
+  W
+}

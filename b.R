@@ -13,6 +13,7 @@ source("R/22_mcmc_sar.R")
 source("R/10_sc_spillover.R")
 source("R/03_utils_plot.R")
 source("R/40_geweke.R")
+source("R/04_utils_diagnostics.R")
 Rcpp::sourceCpp("./R/20_mcmc.cpp")
 Rcpp::sourceCpp("./R/40_geweke.cpp")
 
@@ -38,9 +39,10 @@ fit <- sc_spillover(
   y = "cigsale", # 例: アウトカム列が "smoking_rate" の場合
   X = c("retprice"), # 共変量（列名ベクトル）
   p_factors = 1, # Appendixの因子レイヤを1つ使用
-  M = 2000,
-  burn = 500,
+  M = 10000,
+  burn = 5000,
   seed = 20251022,
+  step_rho = 0.03,
   unit_col = "state",
   time_col = "year"
 )

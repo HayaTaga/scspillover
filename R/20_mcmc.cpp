@@ -578,7 +578,7 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // 未使用
       }
 
       // alpha back to original scale of Y
-      arma::vec alpha_unscaled = alpha * sds_Yc;
+      arma::vec alpha_unscaled = alpha / sds_Yc;
       alpha_draws.row(m) = alpha_unscaled.t();
 
       if (verbose && ((m+1) % 2000 == 0)) {
@@ -602,4 +602,128 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // 未使用
     _["acc_rho"]    = acc_rho_rate,
     _["acc_alpha"]  = acc_alpha_rate
   );
+}
+
+// ---------------------------------------------------------------
+// Gibbs sampler for alpha under horseshoe prior (BSCM part only)
+//   y = X alpha + e,  e ~ N(0, s2 I)
+//   alpha_i ~ N(0, sigma2_i), horseshoe via Makalic–Schmidt
+//   ※ X の各列を標準化してからサンプリングし、返却時に元スケールへ戻す
+// ---------------------------------------------------------------
+// [[Rcpp::export]]
+arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,              // T0
+                             const arma::mat& control_outcome_pre, // T0 x N (X)
+                             int iteration,
+                             int burn,
+                             bool verbose = false) {
+
+  Rcpp::RNGScope scope;
+
+  const int T0 = Y0_pre.n_elem;
+  const int N  = control_outcome_pre.n_cols;
+  if (control_outcome_pre.n_rows != (unsigned)T0) {
+    stop("Dimension mismatch: nrow(Yc_pre) must equal length(Y0_pre).");
+  }
+  const int M = std::max(0, iteration - burn);
+
+  // ----- scale X (column-wise) -----
+  arma::mat X = control_outcome_pre;
+  arma::vec sds_X(N, fill::zeros);
+  for (int j = 0; j < N; ++j) {
+    double sdj = arma::stddev(X.col(j));
+    if (!arma::is_finite(sdj) || sdj < 1e-8) sdj = 1.0;
+    sds_X(j) = sdj;
+    X.col(j) = X.col(j) / sdj;
+  }
+
+  // precompute XtX, Xty
+  arma::mat XtX = X.t() * X;            // N x N
+  arma::vec Xty = X.t() * Y0_pre;       // N
+
+  // ----- storage -----
+  arma::mat alpha_draws(M, N, fill::zeros);
+
+  // ----- states -----
+  arma::vec alpha = 1e-4 * arma::randn<arma::vec>(N);
+  double s2 = 1.0;
+
+  // horseshoe (Makalic–Schmidt)
+  arma::vec sigma2_i(N, fill::ones);   // local λ_i^2
+  arma::vec nu_sigma_i(N, fill::ones); // ν_{λ_i}
+  double tau2 = 1.0, nu_tau = 1.0;     // global τ^2, ν_τ
+
+  // s2 hyper
+  double nu_sigma2 = 1.0;
+
+  // small ridge for numeric stability
+  const double ridge = 1e-10;
+
+  for (int it = 0; it < iteration; ++it) {
+
+    // ---- (1) alpha | rest  ~  N(m, V) ----
+    // V^{-1} = XtX / s2 + Diag(1/sigma2_i)
+    arma::vec inv_sig2 = 1.0 / clip_vec(sigma2_i);
+    arma::mat Prec = XtX / clip1(s2);
+    Prec.diag() += inv_sig2;
+    Prec.diag() += ridge; // numeric guard
+    symmetrize_inplace(Prec);
+
+    arma::mat Prec_chol;
+    if (!robust_chol(Prec_chol, Prec)) {
+      stop("Cholesky(Precision) failed in alpha-step.");
+    }
+    // mean = V * (X'y / s2)  with V = Prec^{-1}
+    // solve(Prec, Xty/s2)
+    arma::vec rhs = Xty / clip1(s2);
+    arma::vec m = solve(trimatu(Prec_chol.t()), solve(trimatl(Prec_chol), rhs));
+
+    // sample from N(m, V): solve(Prec, z) + m, z~N(0,I)
+    arma::vec z = arma::randn<arma::vec>(N);
+    arma::vec v = solve(trimatu(Prec_chol.t()), z); // v ~ N(0, V)
+    alpha = m + v;
+
+    // ---- (2) s2 | rest  ~ IG ----
+    arma::vec resid = Y0_pre - X * alpha;
+    double ss = arma::dot(resid, resid);
+    double shape = 1.0 + 0.5 * T0;              // a0=1 と同等（弱情報）
+    double rate  = 1.0 / clip1(nu_sigma2) + 0.5 * ss;
+    s2 = rinvgamma(shape, rate);
+    // hyper for s2
+    nu_sigma2 = rinvgamma(1.0, 1.0/clip1(s2) + 1.0/100.0);
+
+    // ---- (3) horseshoe locals & global ----
+    // sigma2_i | alpha, nu_sigma_i
+    for (int j = 0; j < N; ++j) {
+      double sc = 0.5 * alpha(j) * alpha(j) + 1.0 / clip1(nu_sigma_i(j));
+      sigma2_i(j) = rinvgamma(1.0, sc);
+    }
+    // nu_sigma_i | sigma2_i, tau2
+    for (int j = 0; j < N; ++j) {
+      double sc = 1.0 / clip1(sigma2_i(j)) + 1.0 / clip1(tau2);
+      nu_sigma_i(j) = rinvgamma(1.0, sc);
+    }
+    // tau2 | nu_sigma_i[*], nu_tau
+    {
+      double sc_tau = 0.0;
+      for (int j = 0; j < N; ++j) sc_tau += 1.0 / clip1(nu_sigma_i(j));
+      sc_tau += 1.0 / clip1(nu_tau);
+      tau2 = rinvgamma(0.5 * (N + 1.0), sc_tau);
+    }
+    // nu_tau | tau2, s2（論文整合のため s2 を参照）
+    nu_tau = rinvgamma(1.0, 1.0/clip1(tau2) + 1.0/clip1(s2));
+
+    // ---- store ----
+    if (it >= burn) {
+      int m_ix = it - burn;
+      // 元スケールへ戻す：alpha_original = alpha_scaled / sd(X_j)
+      arma::vec alpha_unscaled = alpha / sds_X;
+      alpha_draws.row(m_ix) = alpha_unscaled.t();
+
+      if (verbose && ((m_ix + 1) % 2000 == 0)) {
+        Rcpp::checkUserInterrupt();
+      }
+    }
+  }
+
+  return alpha_draws;
 }

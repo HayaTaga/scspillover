@@ -40,6 +40,39 @@ make_w <- function(N, treated = 1L) {
   w
 }
 
+.scspill_cf_post <- function(
+  Y0_post,
+  Yc_post,
+  W,
+  w,
+  alpha_hat,
+  rho_hat,
+  normalize_w = TRUE
+) {
+  N <- length(alpha_hat)
+  IN <- diag(N)
+
+  w_use <- if (normalize_w) {
+    s <- sqrt(sum(w^2))
+    if (!is.finite(s) || s < 1e-12) {
+      s <- 1
+    }
+    as.numeric(w) / s
+  } else {
+    as.numeric(w)
+  }
+
+  Ainv <- solve(IN - rho_hat * (w_use %*% t(alpha_hat) + W))
+  B <- (IN - rho_hat * W)
+  T1 <- nrow(Yc_post)
+  ycf <- numeric(T1)
+  for (t in seq_len(T1)) {
+    tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho_hat * w_use * Y0_post[t])
+    ycf[t] <- as.numeric(crossprod(alpha_hat, tmp))
+  }
+  ycf
+}
+
 # =========================================================
 # SCM: convex QP solver
 # =========================================================
@@ -60,19 +93,19 @@ if (!requireNamespace("quadprog", quietly = TRUE)) {
 # =========================================================
 # Counterfactual under SCSPILL structure (post)
 # =========================================================
-.scspill_cf_post <- function(Y0_post, Yc_post, W, w, alpha_hat, rho_hat) {
-  N <- length(alpha_hat)
-  IN <- diag(N)
-  Ainv <- solve(IN - rho_hat * (w %*% t(alpha_hat) + W))
-  B <- (IN - rho_hat * W)
-  T1 <- nrow(Yc_post)
-  ycf <- numeric(T1)
-  for (t in seq_len(T1)) {
-    tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho_hat * w * Y0_post[t])
-    ycf[t] <- as.numeric(crossprod(alpha_hat, tmp))
-  }
-  ycf
-}
+# .scspill_cf_post <- function(Y0_post, Yc_post, W, w, alpha_hat, rho_hat) {
+#   N <- length(alpha_hat)
+#   IN <- diag(N)
+#   Ainv <- solve(IN - rho_hat * (w %*% t(alpha_hat) + W))
+#   B <- (IN - rho_hat * W)
+#   T1 <- nrow(Yc_post)
+#   ycf <- numeric(T1)
+#   for (t in seq_len(T1)) {
+#     tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho_hat * w * Y0_post[t])
+#     ycf[t] <- as.numeric(crossprod(alpha_hat, tmp))
+#   }
+#   ycf
+# }
 
 # =========================================================
 # DGP (指示の4ステップで素直に生成)
@@ -221,7 +254,7 @@ run_one_sim <- function(
   dgp_args = NULL,
   M = 2000,
   burn = 1000,
-  step_rho = 0.02,
+  step_rho = 0.02, # C++ 側の引数に合わせて残置（Stan は使いません）
   seed = NULL
 ) {
   if (is.null(dgp)) {
@@ -230,7 +263,6 @@ run_one_sim <- function(
     }
     args <- as.list(dgp_args)
 
-    # W / w を補完
     if (is.null(args$W)) {
       grid <- args$grid %||%
         stop("dgp_args: specify `W` or `grid = c(nrow, ncol)`.")
@@ -260,28 +292,28 @@ run_one_sim <- function(
   Y0_post <- dgp$data$Y0_post
   Yc_post <- dgp$data$Yc_post
 
-  # 真の TE / ATE
+  # 真の効果
   y0_cf_true <- dgp$truth$y0_cf_post
   te_true <- Y0_post - y0_cf_true
   ate_true <- mean(te_true)
 
-  # --- SCM（点）---
+  # --- SCM（点推定）---
   alpha_scm <- .scM_qp(Y0_pre, Yc_pre)
   ycf_scm <- as.numeric(Yc_post %*% alpha_scm)
   te_scm <- Y0_post - ycf_scm
   ate_scm <- mean(te_scm)
 
-  # --- BSCM（αの事後）---
-  alpha_draws <- hs_alpha_gibbs_cpp(
+  # --- BSCM（α の事後：従来の Gibbs を利用）---
+  alpha_draws_bscm <- hs_alpha_gibbs_cpp(
     Y0_pre = Y0_pre,
     control_outcome_pre = Yc_pre,
     iteration = M,
     burn = burn,
     verbose = FALSE
   )
-  colnames(alpha_draws) <- colnames(Yc_pre)
-  te_bscm_mat <- matrix(Y0_post, nrow = T1, ncol = nrow(alpha_draws)) -
-    (Yc_post %*% t(alpha_draws))
+  colnames(alpha_draws_bscm) <- colnames(Yc_pre)
+  te_bscm_mat <- matrix(Y0_post, nrow = T1, ncol = nrow(alpha_draws_bscm)) -
+    (Yc_post %*% t(alpha_draws_bscm))
   te_bscm_mean <- rowMeans(te_bscm_mat)
   ate_bscm_draws <- colMeans(te_bscm_mat)
   ate_bscm_mean <- mean(te_bscm_mean)
@@ -298,7 +330,7 @@ run_one_sim <- function(
     numeric(1)
   ))
 
-  # --- SCSPILL（α & ρ を同期）---
+  # --- SCSPILL（C++ サンプラの α・ρ を共同で使用）---
   sar <- sar_full_sampler_cpp(
     Y0_pre = Y0_pre,
     Yc_pre = Yc_pre,
@@ -307,7 +339,7 @@ run_one_sim <- function(
     N = N,
     K = K,
     p = 0,
-    w = as.numeric(w),
+    w_in = as.numeric(w),
     W = W,
     iteration = M,
     burn = burn,
@@ -316,18 +348,22 @@ run_one_sim <- function(
     b0 = 1.0,
     verbose = FALSE
   )
-  rho_draws <- as.numeric(sar$rho)
 
-  M_pair <- min(nrow(alpha_draws), length(rho_draws))
+  rho_draws_joint <- as.numeric(sar$rho)
+  alpha_draws_joint <- as.matrix(sar$alpha) # M x N（C++ 側で元スケールに戻したもの）
+
+  # 反実仮想（w 正規化を C++ に揃える）
+  M_pair <- min(nrow(alpha_draws_joint), length(rho_draws_joint))
   te_spill_mat <- matrix(NA_real_, nrow = T1, ncol = M_pair)
   for (m in seq_len(M_pair)) {
     ycf_m <- .scspill_cf_post(
-      Y0_post,
-      Yc_post,
-      W,
-      w,
-      alpha_draws[m, ],
-      rho_draws[m]
+      Y0_post = Y0_post,
+      Yc_post = Yc_post,
+      W = W,
+      w = w,
+      alpha_hat = alpha_draws_joint[m, ],
+      rho_hat = rho_draws_joint[m],
+      normalize_w = TRUE # ★ C++ と揃える
     )
     te_spill_mat[, m] <- Y0_post - ycf_m
   }
@@ -380,8 +416,8 @@ run_one_sim <- function(
   list(
     truth = dgp$truth,
     draws = list(
-      alpha = alpha_draws,
-      rho = rho_draws,
+      alpha_bscm = alpha_draws_bscm,
+      scspill_joint = list(alpha = alpha_draws_joint, rho = rho_draws_joint),
       ate = list(bscm = ate_bscm_draws, scspill = ate_spill_draws)
     ),
     effects = list(
@@ -423,6 +459,8 @@ run_many_sim <- function(
 summarize_many <- function(results) {
   stopifnot(is.list(results), length(results) > 0)
   tab <- do.call(rbind, lapply(results, function(r) r$metrics))
+
+  # 欲しい列
   keep <- c(
     "bias_ate",
     "rmse_ate",
@@ -431,13 +469,34 @@ summarize_many <- function(results) {
     "cover95_ate",
     "cover95_point"
   )
-  agg_mean <- aggregate(. ~ method, data = tab, FUN = mean, na.rm = TRUE)
-  agg_sd <- aggregate(. ~ method, data = tab, FUN = sd, na.rm = TRUE)
-  out <- merge(
-    agg_mean[, c("method", keep)],
-    setNames(agg_sd[, c("method", keep)], c("method", paste0(keep, "_sd"))),
-    by = "method",
-    sort = FALSE
+
+  # method を3手法の固定レベルに
+  lev <- c("SCM", "BSCM", "SCSPILL")
+  tab$method <- factor(tab$method, levels = lev)
+
+  # 平均とSD（全NAなら NA を返す）
+  safe_mean <- function(x) {
+    if (all(is.na(x))) NA_real_ else mean(x, na.rm = TRUE)
+  }
+  safe_sd <- function(x) if (all(is.na(x))) NA_real_ else sd(x, na.rm = TRUE)
+
+  agg_mean <- aggregate(
+    tab[, keep, drop = FALSE],
+    list(method = tab$method),
+    safe_mean
   )
-  out[order(match(out$method, c("SCSPILL", "BSCM", "SCM"))), ]
+  agg_sd <- aggregate(
+    tab[, keep, drop = FALSE],
+    list(method = tab$method),
+    safe_sd
+  )
+  names(agg_sd)[-1] <- paste0(names(agg_sd)[-1], "_sd")
+
+  out <- merge(agg_mean, agg_sd, by = "method", all = TRUE)
+
+  # 3手法が必ず並ぶよう整列
+  out$method <- factor(out$method, levels = lev)
+  out <- out[order(as.integer(out$method)), , drop = FALSE]
+  rownames(out) <- NULL
+  out
 }

@@ -6,7 +6,8 @@ library(Matrix)
 load("./data/california_smoking.rda")
 california_smoking
 
-
+Rcpp::sourceCpp("./R/20_mcmc_.cpp")
+Rcpp::sourceCpp("./R/40_geweke.cpp")
 source("R/01_utils.R")
 source("R/21_mcmc_alpha.R")
 source("R/22_mcmc_sar.R")
@@ -14,8 +15,6 @@ source("R/10_sc_spillover_.R")
 source("R/03_utils_plot.R")
 source("R/40_geweke.R")
 source("R/04_utils_diagnostics.R")
-Rcpp::sourceCpp("./R/20_mcmc_.cpp")
-Rcpp::sourceCpp("./R/40_geweke.cpp")
 
 panel_df <- california_smoking$panel
 w_vec <- california_smoking$w
@@ -214,7 +213,7 @@ mc_grid_study <- function(
     m <- round(sqrt(N))
     if (m * m != N) {
       stop(sprintf(
-        "N=%d は完全平方数ではありません（%d×%dにできません）。",
+        "N=%d は完全平方数ではありません（%dx%dにできません）。",
         N,
         m,
         m
@@ -293,7 +292,7 @@ study <- mc_grid_study(
   T0s = c(30),
   rhos = c(0.3),
   T1 = 20,
-  sims_per = 5,
+  sims_per = 1000,
   K = 1,
   beta = c(1.0),
   sigma2 = 1.0,

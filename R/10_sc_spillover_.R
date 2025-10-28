@@ -178,10 +178,43 @@ sc_spillover <- function(
     ycf
   }
 
+  spill_one_rho <- function(rho) {
+    # Y_cf = (I - rho*W - rho*w*a')^{-1} * [ (I - rho*W)Yc - rho*w*Y0 ]
+    
+    # M_obs_inv = (I - rho*W - rho*w*a')^{-1}
+    M_obs_inv <- solve(IN - rho * (W + w_l2 %*% t(alpha_hat)))
+    
+    # B = (I - rho*W)
+    B <- (IN - rho * W)
+    
+    Yc_post_cf <- matrix(NA_real_, nrow = T1, ncol = N)
+    for (t in seq_len(T1)) {
+      # Yc_post_cf[t, ] = M_obs_inv %*% ( B %*% Yc_post[t, ] - rho * w_l2 * Y0_post[t] )
+      
+      # (cf_one_rho と同じ計算)
+      tmp <- M_obs_inv %*% (B %*% Yc_post[t, ] - rho * w_l2 * Y0_post[t])
+      Yc_post_cf[t, ] <- as.numeric(tmp)
+    }
+    
+    # Spillover = Y_obs - Y_cf
+    spill_effect <- Yc_post - Yc_post_cf
+    spill_effect
+  }
+
   # 点推定（rho_hat）
   ycf_point <- cf_one_rho(rho_hat)
   te_point <- as.numeric(Y0_post - ycf_point)
   ate_point <- mean(te_point)
+
+  spill_draws_list <- lapply(rho_draws, spill_one_rho)
+  # (T1 x N x M) の配列に変換
+  spill_draws_array <- array(
+    unlist(spill_draws_list), 
+    dim = c(T1, N, length(rho_draws))
+  )
+
+  spill_mean_matrix <- apply(spill_draws_array, c(1, 2), mean, na.rm = TRUE)
+  colnames(spill_mean_matrix) <- colnames(Yc_post) # ユニット名を付与
 
   # ATE の 95% CI（rho のみ回して近似）
   ate_draws <- vapply(
@@ -202,7 +235,8 @@ sc_spillover <- function(
   eff <- list(
     te_point = te_point, # T1-vector
     ate_point = ate_point, # scalar
-    ate_ci95 = ate_ci95 # length-2
+    ate_ci95 = ate_ci95, # length-2
+    spill = spill_mean_matrix
   )
 
   # 出力を従来の形に合わせて構築
@@ -262,3 +296,4 @@ row_normalize <- function(W, tol = 1e-12, zero_policy = c("keep", "uniform0")) {
   }
   W
 }
+

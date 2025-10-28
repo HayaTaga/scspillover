@@ -47,78 +47,139 @@ inline bool robust_chol(arma::mat& R, arma::mat A, double base_eps=1e-10) {
 // ================================================================
 // [[Rcpp::export]]
 arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
-                             const arma::mat& control_outcome_pre,
-                             int iteration,
-                             int burn,
-                             double a0 = 1.0,     // IG prior for sigma2: shape a0
-                             double b0 = 1.0,     // IG prior for sigma2: scale b0
-                             bool verbose = false) {
+                                           const arma::mat& control_outcome_pre,
+                                           const int iteration,
+                                           const int burn,
+                                           const bool verbose=false) {
   Rcpp::RNGScope scope;
 
-  const int T0 = control_outcome_pre.n_rows;
-  const int N  = control_outcome_pre.n_cols;
-  const int M  = std::max(0, iteration - burn);
+  const int T0 = (int)Y0_pre.n_elem;
+  const int N  = (int)control_outcome_pre.n_cols;
+  const int iters = iteration;
 
-  arma::mat X = control_outcome_pre; // T0 x N
-  arma::vec y = Y0_pre;              // T0
+  const double FLO = 1e-12, FHI = 1e12;
 
-  // States
-  arma::vec alpha = arma::zeros<arma::vec>(N);
-  double sigma2   = 1.0;
+  
+  vec alpha_curr = 1e-4 * randn<vec>(N);
 
-  // Horseshoe auxiliaries (Makalic–Schmidt)
-  arma::vec lambda2    = arma::ones<arma::vec>(N); // local scales
-  arma::vec nu_lambda  = arma::ones<arma::vec>(N);
-  double tau2          = 1.0;                      // global scale
-  double nu_tau        = 1.0;
+  arma::vec sx(N);
+  for (int j=0; j<N; ++j){
+    double sdj = std::sqrt(arma::var(control_outcome_pre.col(j)));
+    if(!arma::is_finite(sdj) || sdj < 1e-8) sdj = 1e-8;
+    sx(j) = sdj;
+  }
 
-  arma::mat XtX = X.t() * X;                       // N x N
-  arma::vec Xty = X.t() * y;                       // N
+  double sy = std::sqrt(arma::var(Y0_pre));
+  if(!arma::is_finite(sy) || sy < 1e-8) sy = 1e-8;
 
-  arma::mat out(M, N, arma::fill::zeros);
+  arma::mat X = control_outcome_pre;
+  for (int j=0; j<N; ++j) X.col(j) /= sx(j);
+  arma::vec y = Y0_pre / sy;
 
-  for (int it = 0; it < iteration; ++it) {
-    // (1) alpha | sigma2, tau2, lambda2, y
-    arma::vec inv_prior = 1.0 / clip_vec(tau2 * lambda2); // diag prior precision (since prior Var = tau2*lambda2)
-    arma::mat Prec = XtX / clip1(sigma2) + diagmat(inv_prior);
-    symmetrize_inplace(Prec);
+  vec sigma2_i_curr(N, fill::ones);
+  vec nu_sigma_i_curr(N, fill::ones);
+  double tau2_curr   = 1.0;
+  double nu_tau_curr = 1.0;
+  double sigma2_curr = as_scalar(var(y));
+  if (!arma::is_finite(sigma2_curr) || sigma2_curr <= 0.0) sigma2_curr = 1.0;
+  double nu_sigma_curr = 1.0;
 
-    arma::mat L;
-    if (!robust_chol(L, Prec)) Rcpp::stop("chol failed in alpha update");
-    arma::vec m = solve(Prec, Xty / clip1(sigma2)); // mean
-    // draw via solving L L' z = ...
-    arma::vec z = arma::randn<arma::vec>(N);
-    // Use precision factorization: alpha = m + L^{-T} z
-    alpha = m + solve(trimatu(L.t()), z);
+  mat XtX = X.t() * X;
+  vec Xty = X.t() * y;
 
-    // (2) sigma2 | rest
-    arma::vec resid = y - X * alpha;
-    double ss = arma::dot(resid, resid);
-    sigma2 = rinvgamma(a0 + 0.5 * T0, b0 + 0.5 * ss);
+  const int M = std::max(0, iters - burn);
+  mat draws(M, N, fill::none);
 
-    // (3) local scales lambda2_j
-    for (int j=0; j<N; ++j) {
-      double rate = 1.0/clip1(nu_lambda(j)) + 0.5 * (alpha(j)*alpha(j)) / clip1(sigma2 * tau2);
-      lambda2(j) = rinvgamma(1.0, rate);
-      double rate_nu = 1.0 + 1.0/clip1(lambda2(j));
-      nu_lambda(j) = rinvgamma(1.0, rate_nu);
+  for (int iter = 1; iter <= iters; ++iter) {
+    if (verbose && (iter % 2000 == 0)) {
+      Rcpp::Rcout << "Now, iteration = " << iter << "\n";
+      Rcpp::checkUserInterrupt();
     }
 
-    // (4) global scale tau2
-    double sum_term = 0.0;
-    for (int j=0; j<N; ++j) sum_term += (alpha(j)*alpha(j)) / clip1(sigma2 * lambda2(j));
-    double rate_tau = 1.0/clip1(nu_tau) + 0.5 * sum_term;
-    tau2 = rinvgamma(0.5*(N + 1.0), rate_tau);
-    nu_tau = rinvgamma(1.0, 1.0 + 1.0/clip1(tau2));
+    // ===== D = D_temp + sigma2 * Diagonal(1 ./ sigma2_i) =====
+    vec inv_sigma2_i = 1.0 / clamp(sigma2_i_curr, FLO, FHI);
+    double sig2 = std::min(std::max(sigma2_curr, FLO), FHI);
+    double tau2 = std::min(std::max(tau2_curr, FLO), FHI);
+    // Rcpp::Rcout << sig2 << '\n';
+    mat D = XtX;
+    D.diag() += sig2 * (inv_sigma2_i);
 
-    // store
-    if (it >= burn) {
-      out.row(it - burn) = alpha.t();
-      if (verbose && (((it - burn + 1) % 2000) == 0)) Rcpp::checkUserInterrupt();
+    // cholesky(D)
+    mat R;                                  // 上三角：D = R^T R
+    bool ok = robust_chol(R, D);
+    if (!ok) Rcpp::stop("chol(D) failed even after stabilization.");
+
+    // ===== D_inv = Symmetric( D_chol \ I ) =====
+    mat I_N = eye<mat>(N, N);
+    // mat D_inv = solve(trimatu(R), I_N, solve_opts::fast);
+    // D_inv = solve(trimatl(R.t()), D_inv, solve_opts::fast);
+    mat D_inv = solve(D, I_N, solve_opts::fast);
+    symmetrize_inplace(D_inv);
+
+    // ===== alpha_mean = D_inv * X' * Y0,  alpha_cov = sigma2 * D_inv =====
+    vec alpha_mean = D_inv * Xty;
+
+    // サンプリング：alpha ~ N(alpha_mean, sigma2 * D_inv)
+    // L = sqrt(sigma2) * chol(D_inv)
+    // mat Rinv;
+    // bool ok2 = robust_chol(Rinv, D_inv);
+    // if (!ok2) Rcpp::stop("chol(D_inv) failed even after stabilization.");
+
+    // vec z = randn<vec>(N);
+    // vec step = solve(trimatu(Rinv), z, solve_opts::fast);
+    // vec alpha_new = alpha_mean + std::sqrt(sig2) * step;
+    // alpha_curr = alpha_new;
+
+    arma::mat Sigma = std::max(sig2, 1e-12) * D_inv;  // 共分散行列 Σ = σ² · A⁻¹
+    // Rcpp::Rcout << alpha_mean << "\n";
+    // Rcpp::Rcout << Sigma << "\n";
+    arma::vec alpha_new = arma::mvnrnd(alpha_mean, Sigma, 1);  // 多変量正規 N(μ, Σ) から1サンプル
+    alpha_curr = alpha_new;
+
+    // sigma2_i[i] ~ IG(1, 0.5*alpha[i]^2 + 1/nu_sigma_i[i])
+    vec sigma2_i_next(N);
+    for (int i=0;i<N;++i) {
+      double sc = 0.5 * alpha_curr[i]*alpha_curr[i] + 1.0 / std::max(nu_sigma_i_curr[i], FLO);
+      double draw = rinvgamma(1.0, sc);
+      sigma2_i_next[i] = std::min(std::max(draw, FLO), FHI);
+    }
+    sigma2_i_curr = sigma2_i_next;
+
+    // nu_sigma_i[i] ~ IG(1, 1/sigma2_i[i] + 1/tau2)
+    vec nu_sigma_i_next(N);
+    for (int i=0;i<N;++i) {
+      double sc = 1.0 / std::max(sigma2_i_curr[i], FLO) + 1.0 / std::max(tau2_curr, FLO);
+      double draw = rinvgamma(1.0, sc);
+      nu_sigma_i_next[i] = std::min(std::max(draw, FLO), FHI);
+    }
+    nu_sigma_i_curr = nu_sigma_i_next;
+
+    // tau2 ~ IG((N+1)/2, sum(1./nu_sigma_i) + 1/nu_tau)
+    double sc_tau = accu(1.0 / clamp(nu_sigma_i_curr, FLO, FHI)) + 1.0 / std::max(nu_tau_curr, FLO);
+    tau2_curr = std::min(std::max(rinvgamma(0.5 * (N + 1.0), sc_tau), FLO), FHI);
+
+    // nu_tau ~ IG(1, 1/tau2 + 1/sigma2)
+    double sc_nutau = 1.0 / std::max(tau2_curr, FLO) + 1.0 / std::max(sigma2_curr, FLO);
+    nu_tau_curr = std::min(std::max(rinvgamma(1.0, sc_nutau), FLO), FHI);
+
+    // sigma2 ~ IG(1 + T0/2, 1/nu_tau + 1/nu_sigma + 0.5 * SSE)
+    vec res = y - X * alpha_curr;
+    double sse = dot(res, res);
+    double shape_sig = 1.0 + 0.5 * T0;
+    double sc_sig = 1.0 / std::max(nu_tau_curr, FLO) + 1.0 / std::max(nu_sigma_curr, FLO) + 0.5 * sse;
+    sigma2_curr = std::min(std::max(rinvgamma(shape_sig, sc_sig), FLO), FHI);
+
+    // nu_sigma ~ IG(1, 1/sigma2 + 1/10^2)
+    double sc_nus = 1.0 / std::max(sigma2_curr, FLO) + 1.0 / (10.0 * 10.0);
+    nu_sigma_curr = std::min(std::max(rinvgamma(1.0, sc_nus), FLO), FHI);
+
+    // keep
+    if (iter > burn){
+      for (int j=0; j<N; ++j) draws(iter - burn - 1, j) = (sy / sx(j)) * alpha_curr[j];
     }
   }
 
-  return out; // M x N
+  return draws;
 }
 
 // ================================================================
@@ -143,7 +204,7 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
 
   const int M = std::max(0, iteration - burn);
 
-  // ---------- scale Yc columns by SD (improves numeric stability) ----------
+  // ---------- scale Yc columns by SD ----------
   arma::mat Yc_orig = Yc_pre; // T0 x N
   arma::vec sds_Yc(N);
   arma::mat Yc = Yc_orig;
@@ -153,12 +214,9 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     sds_Yc(j) = sdj;
     Yc.col(j) = Yc_orig.col(j) / sdj;
   }
-
-  // alpha used internally must be consistent with scaled Yc:
-  // alpha_int^T * (Yc_orig / sds) = (alpha_unscaled^T / sds) Yc_orig
   arma::vec alpha = alpha_hat_in / sds_Yc; // N
 
-  // normalize w (reduce confounding scale with rho)
+  // normalize w
   arma::vec w = w_in;
   double wnorm = std::sqrt(arma::dot(w, w));
   if (wnorm > 0.0) w /= wnorm;
@@ -176,7 +234,7 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     return Xt;
   };
 
-  // spectral bound for rho (stability)
+  // spectral bound for rho
   arma::cx_vec evals = arma::eig_gen(W);
   double maxabs = 0.0;
   for (uword i=0; i<evals.n_elem; ++i) maxabs = std::max(maxabs, std::abs(evals[i]));
@@ -192,40 +250,68 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
   // states
   double rho = 0.0;
   double s2  = 1.0;
-
   arma::vec beta = (K>0 ? arma::zeros<arma::vec>(K) : arma::vec());
-
-  arma::mat Eta   = (p>0 ? arma::zeros<arma::mat>(N,p) : arma::mat()); // N x p
-  arma::mat Gamma = (p>0 ? arma::zeros<arma::mat>(p,T0) : arma::mat()); // p x T0
+  arma::mat Eta   = (p>0 ? arma::zeros<arma::mat>(N,p) : arma::mat());
+  arma::mat Gamma = (p>0 ? arma::zeros<arma::mat>(p,T0) : arma::mat());
   double phi_g = 0.0, s2_g = 1.0, nu_s2_g = 1.0;
   arma::vec omega_k    = (p>0 ? arma::ones<arma::vec>(p) : arma::vec());
   arma::vec nu_omega_k = (p>0 ? arma::ones<arma::vec>(p) : arma::vec());
   double s2_eta = 1.0, nu_s2_eta = 1.0;
-
   double nu_sigma2 = 1.0;
 
   arma::mat I_N = arma::eye(N,N);
   arma::mat I_K = (K>0 ? arma::eye(K,K) : arma::mat());
   arma::mat I_p = (p>0 ? arma::eye(p,p) : arma::mat());
 
-  auto Mtilde = [&](double r)->arma::mat {
-    // Ã(r) = I − r W − r w αᵀ  (alpha is fixed)
-    return I_N - r * W - r * w * alpha.t();
-  };
+  // ------------------------------------------------------------------
+  // ★★★ 高速化のための事前計算 (MCMCループの外) ★★★
+  // ------------------------------------------------------------------
+  
+  // A = W + w * alpha^T (alpha はスケーリング済み)
+  // M = I - rho * A
+  arma::mat A_const = W + w * alpha.t();
+  
+  // 1. A の固有値 (複素数) を計算 (O(N^3) を 1回だけ)
+  arma::cx_vec evals_A;
+  if (!arma::eig_gen(evals_A, A_const)) {
+      Rcpp::stop("Eigenvalue calculation failed for A_const.");
+  }
+  
+  // 2. A*Yc_t の積を事前計算 (O(T0*N^2) を 1回だけ)
+  std::vector<arma::vec> AYc_vec(T0);
+  for(int t=0; t<T0; ++t) {
+      AYc_vec[t] = A_const * Yc.row(t).t();
+  }
+  // ------------------------------------------------------------------
 
+
+  // Mtilde は使わなくなったのでコメントアウト (または削除)
+  // auto Mtilde = [&](double r)->arma::mat {
+  //   return I_N - r * W - r * w * alpha.t();
+  // };
+
+  // ★★★ 高速化された loglik_core_pair (O(T0*N) に) ★★★
   auto loglik_core_pair = [&](double r)->std::pair<double,double> {
     if (std::abs(r) >= bnd) return {-std::numeric_limits<double>::infinity(), 0.0};
-    arma::mat M = Mtilde(r);
-    double ldetM = logdet_stable(M);
+
+    // (1) 高速な log|det| (O(N))
+    double ldetM = 0.0;
+    for (arma::uword i = 0; i < evals_A.n_elem; ++i) {
+        ldetM += std::log(std::complex<double>(1.0, 0.0) - r * evals_A(i)).real();
+    }
     if (!std::isfinite(ldetM)) return {-std::numeric_limits<double>::infinity(), 0.0};
 
+    // (2) 高速な残差平方和 (ss) (O(T0*N))
     double ss = 0.0;
     for (int t=0; t<T0; ++t) {
-      arma::vec u = M * Yc.row(t).t();
+      // u_t = (I - rho*A)*Yc_t - Xb - Lf
+      // u_t = Yc_t - rho*(A*Yc_t) - Xb - Lf
+      arma::vec u = Yc.row(t).t() - r * AYc_vec[t]; // ★ O(N)
       if (useX)  u -= X_get_row(t) * beta;
       if (p>0)   u -= Eta * Gamma.col(t);
       ss += arma::dot(u,u);
     }
+    
     double ll = T0 * ldetM - 0.5 * (N*T0) * std::log(s2) - 0.5 * ss / s2;
     return {ll, ss};
   };
@@ -243,7 +329,6 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
       arma::mat Phi   = I_p * phi_g;
       arma::mat Q_mat = I_p * s2_g;
       arma::mat H_mat = Eta;
-
       arma::mat HtH_s2_inv = (H_mat.t() * H_mat) / clip1(s2);
       arma::mat Ht_s2_inv  = H_mat.t() / clip1(s2);
 
@@ -256,8 +341,8 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
       arma::mat P_prev = (clip1(s2_g) / std::max(1e-6, 1.0 - phi_g*phi_g)) * I_p;
 
       for (int t = 0; t < T0; ++t) {
-        arma::mat M = Mtilde(rho);
-        arma::vec Y_star_t = M * Yc.row(t).t();
+        // ★ 修正: Y_star_t = Yc_t - rho*(A*Yc_t) - Xb
+        arma::vec Y_star_t = Yc.row(t).t() - rho * AYc_vec[t];
         if (useX) Y_star_t -= X_get_row(t) * beta;
 
         arma::vec pred = Phi * gamma_prev;
@@ -269,15 +354,12 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
 
         arma::vec m_t = V_t * (P_inv_pred * pred + Ht_s2_inv * Y_star_t);
 
-        gamma_t_t[t]  = m_t;
-        P_t_t[t]      = V_t;
-        gamma_t_t1[t] = pred;
-        P_t_t1[t]     = P_pred;
-
-        gamma_prev = m_t;
-        P_prev     = V_t;
+        gamma_t_t[t]  = m_t; P_t_t[t] = V_t;
+        gamma_t_t1[t] = pred; P_t_t1[t] = P_pred;
+        gamma_prev = m_t; P_prev = V_t;
       }
-
+      
+      // ... (Backward sampling と phi_g, s2_g の更新は変更なし) ...
       arma::vec m_T = gamma_t_t[T0 - 1];
       arma::mat V_T = P_t_t[T0 - 1];
       arma::mat L_T = arma::chol(0.5 * (V_T + V_T.t()), "lower");
@@ -287,28 +369,21 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
         arma::vec g_next = Gamma.col(t + 1);
         arma::mat P_inv_next_pred = arma::inv_sympd(P_t_t1[t + 1]);
         arma::mat J_t = P_t_t[t] * Phi.t() * P_inv_next_pred;
-
         arma::vec m_s = gamma_t_t[t] + J_t * (g_next - gamma_t_t1[t + 1]);
         arma::mat V_s = P_t_t[t] - J_t * Phi * P_t_t[t];
-
         arma::mat Ls = arma::chol(0.5 * (V_s + V_s.t()), "lower");
         Gamma.col(t) = m_s + Ls * arma::randn<arma::vec>(p);
       }
-
-      // phi_g
       double den = 0.0, num = 0.0;
       for (int t=0; t<T0; ++t) {
         arma::vec gl = (t==0) ? arma::zeros<arma::vec>(p) : arma::vec(Gamma.col(t-1));
-        den += arma::dot(gl, gl);
-        num += arma::dot(gl, Gamma.col(t));
+        den += arma::dot(gl, gl); num += arma::dot(gl, Gamma.col(t));
       }
       double mean_phi = (den > 0 ? num / den : 0.0);
       double var_phi  = (den > 0 ? s2_g / den : 1.0);
       double cand_phi;
       do { cand_phi = R::rnorm(mean_phi, std::sqrt(var_phi)); } while (std::abs(cand_phi) > 1.0);
       phi_g = cand_phi;
-
-      // s2_g
       double sc_g = 0.0;
       for (int t=0; t<T0; ++t) {
         arma::vec gl = (t==0) ? arma::zeros<arma::vec>(p) : arma::vec(Gamma.col(t-1));
@@ -321,8 +396,8 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
 
     // (2) Eta | rest
     if (p>0) {
-      arma::mat GtG = Gamma * Gamma.t();     // p x p
-      arma::mat Domega = diagmat(omega_k);   // p x p
+      arma::mat GtG = Gamma * Gamma.t();
+      arma::mat Domega = diagmat(omega_k);
 
       arma::mat Vrow = arma::inv_sympd( GtG / s2 + Domega / clip1(s2_eta) );
       arma::mat Lrow = chol(Vrow, "lower");
@@ -330,7 +405,8 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
       for (int i=0; i<N; ++i) {
         arma::vec rhs = arma::zeros<arma::vec>(p);
         for (int t=0; t<T0; ++t) {
-          arma::vec r = Mtilde(rho) * Yc.row(t).t();
+          // ★ 修正: r = Yc_t - rho*(A*Yc_t) - Xb
+          arma::vec r = Yc.row(t).t() - rho * AYc_vec[t];
           if (useX) r -= X_get_row(t) * beta;
           rhs += Gamma.col(t) * r(i);
         }
@@ -338,7 +414,7 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
         arma::vec z = arma::randn<arma::vec>(p);
         Eta.row(i) = (m + Lrow * z).t();
       }
-
+      // ... (s2_eta, omega_k の更新は変更なし) ...
       double sc_eta = 0.0;
       for (int i=0;i<N;++i) {
         arma::vec ei = Eta.row(i).t();
@@ -346,7 +422,6 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
       }
       s2_eta    = rinvgamma(0.5 + 0.5 * p * N, 0.5*sc_eta + 1.0/clip1(nu_s2_eta));
       nu_s2_eta = rinvgamma(1.0, 1.0/clip1(s2_eta) + 1.0/100.0);
-
       for (int k_idx=0;k_idx<p;++k_idx) {
         double tmp = 0.0;
         for (int i=0;i<N;++i) tmp += 0.5 * Eta(i,k_idx)*Eta(i,k_idx) / clip1(s2_eta);
@@ -356,20 +431,20 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
       }
     }
 
-    // (3) beta | rest (Gaussian, with weak ridge for stability)
+    // (3) beta | rest
     if (useX) {
       arma::mat Ab = arma::zeros<arma::mat>(K,K);
       arma::vec Bb = arma::zeros<arma::vec>(K);
 
       for (int t=0; t<T0; ++t) {
-        arma::mat Xt = X_get_row(t);          // N x K
+        arma::mat Xt = X_get_row(t);
         Ab += Xt.t() * Xt;
-        arma::vec Btmp = Mtilde(rho) * Yc.row(t).t();
+        // ★ 修正: Btmp = Yc_t - rho*(A*Yc_t) - Lf
+        arma::vec Btmp = Yc.row(t).t() - rho * AYc_vec[t];
         if (p>0) Btmp -= Eta * Gamma.col(t);
         Bb += Xt.t() * Btmp;
       }
-      // ridge with tiny prior variance ~ s2 * 1e6
-      Ab += (s2 * 1e-6) * I_K;
+      Ab += (s2 * 1e-6) * I_K; // ridge
 
       arma::mat Ainv = arma::inv_sympd(Ab);
       arma::vec m_b  = Ainv * Bb;
@@ -381,19 +456,21 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     // (4) sigma^2 | rest
     double ss = 0.0;
     for (int t=0; t<T0; ++t) {
-      arma::vec u = Mtilde(rho) * Yc.row(t).t();
+      // ★ 修正: u = Yc_t - rho*(A*Yc_t) - Xb - Lf
+      arma::vec u = Yc.row(t).t() - rho * AYc_vec[t];
       if (useX) u -= X_get_row(t) * beta;
       if (p>0)  u -= Eta * Gamma.col(t);
       ss += arma::dot(u,u);
     }
     s2 = rinvgamma(a0 + 0.5 * (T0 * N), b0 + 0.5 * ss);
-    nu_sigma2 = rinvgamma(1.0, 1.0/clip1(s2) + 1.0/100.0); // weakly inform
+    nu_sigma2 = rinvgamma(1.0, 1.0/clip1(s2) + 1.0/100.0);
 
     // (5) rho | rest (Adaptive RWMH)
     {
       double current_step = std::exp(log_step_rho);
       double prop_rho = R::rnorm(rho, current_step);
 
+      // ★ 修正: 高速化された loglik_core_pair (O(T0*N)) を使用
       double lcur = loglik_core_pair(rho).first;
       double lprp = loglik_core_pair(prop_rho).first;
 
@@ -423,11 +500,11 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
   return Rcpp::List::create(
     _["rho"]        = rho_draws,
     _["sigma2"]     = s2_draws,
-    _["beta"]       = beta_draws,        // M x K (if K=0: empty)
-    _["Lambda"]     = Lambda_draws,      // N x p x M (if p=0: empty)
-    _["F"]          = F_draws,           // p x T0 x M (if p=0: empty)
+    _["beta"]       = beta_draws,
+    _["Lambda"]     = Lambda_draws,
+    _["F"]          = F_draws,
     _["acc_rho"]    = acc_rho / std::max(1, M),
     _["final_log_step_rho"] = log_step_rho,
-    _["sds_Yc"]     = sds_Yc            // 参考：内部で使用したスケール
+    _["sds_Yc"]     = sds_Yc
   );
 }

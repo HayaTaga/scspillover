@@ -446,30 +446,49 @@ plot.scspill <- function(
 
   # -------- effect: post の処置効果 --------
   if (type == "effect") {
-    df <- td$treat
+    
+    # CFを計算（"full" と同じロジック）
+    cf <- scspill_counterfactual(x, cred = cred, time_col = time_col)
+    
+    # 介入後 (post) のみ抽出
+    df_post <- subset(cf, period == "post")
+    
+    # 処置効果 (Effect = Observed - Counterfactual) を計算
+    # 信用区間は (Obs - CF_hi, Obs - CF_lo) となる
+    df <- data.frame(
+        time = df_post$time,
+        mean = df_post$y_obs - df_post$y_cf_mean,
+        lo = df_post$y_obs - df_post$y_cf_hi, # 観測値 - CFの上限 = 効果の下限
+        hi = df_post$y_obs - df_post$y_cf_lo  # 観測値 - CFの下限 = 効果の上限
+    )
+    
+    # エラー回避: 介入後データがない場合は空のプロットを返す
+    if (nrow(df) == 0) {
+        warning("`type = 'effect'` が呼び出されましたが、介入後のデータ (post) が見つかりません。")
+        return(ggplot2::ggplot() + ggplot2::theme_void() + 
+               ggplot2::ggtitle("No post-treatment data found."))
+    }
+
     # 連続 index（ラベルは time）
     df$.idx <- seq_len(nrow(df))
+    
     gg <- ggplot2::ggplot(df, ggplot2::aes(.idx, mean)) +
       ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi), alpha = 0.20) +
+      # ゼロラインを追加
+      ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
       ggplot2::geom_line() +
       ggplot2::theme_minimal() +
       ggplot2::labs(
         x = "Time (post)",
-        y = "Treatment effect",
+        y = "Treatment effect (Observed - Counterfactual)", # Y軸ラベルを明確化
         title = "Estimated treatment effect (post)"
       ) +
       ggplot2::scale_x_continuous(breaks = df$.idx, labels = df$time)
     return(gg)
   }
-
   # -------- spill_top: 上位ユニットのスピル --------
   if (type == "spill_top") {
-    # td <- tidy_scspill(x, time_col = time_col)
-    # df <- td$spill
-    cf <- scspill_counterfactual(x, cred = cred, time_col = time_col)
-    df <- subset(cf, period == "post", select = c(time, y_cf_lo, y_cf_hi))
-    df$mean <- (df$y_cf_lo + df$y_cf_hi) / 2
-    df$.idx <- seq_len(nrow(df))
+    df <- td$spill 
 
     if (!nrow(df)) {
       stop(
@@ -478,7 +497,6 @@ plot.scspill <- function(
       )
     }
 
-    # 念のため型を保証
     df$unit <- as.character(df$unit)
     df$time <- suppressWarnings(as.numeric(df$time))
     df$mean <- suppressWarnings(as.numeric(df$mean))
@@ -488,7 +506,6 @@ plot.scspill <- function(
       drop = FALSE
     ]
 
-    # abs(mean) の平均で上位抽出（formula で abs() を使わない）
     agg <- stats::aggregate(
       x = list(abs_mean = abs(df$mean)),
       by = list(unit = df$unit),

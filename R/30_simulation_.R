@@ -143,7 +143,7 @@ scspill_sim_dgp <- function(
 
   IN <- diag(N)
 
-  # (A) no-treatment world 全期間
+  # (A) no-treatment
   A_pre <- IN - rho * W - rho * (w %*% t(alpha))
   rcA <- tryCatch(rcond(A_pre), error = function(e) NA_real_)
   if (!is.finite(rcA) || rcA < 1e-10) {
@@ -178,7 +178,7 @@ scspill_sim_dgp <- function(
     }
     yc0 <- gen_yc0(Xt, error_all[t, ])
     Yc0_all[t, ] <- yc0
-    Y00_all[t] <- sum(alpha %*% yc0)
+    Y00_all[t] <- as.numeric(crossprod(alpha, yc0))
   }
 
   # (B) post: treatment shock & SAR
@@ -189,8 +189,9 @@ scspill_sim_dgp <- function(
   }
   A_post_inv <- solve(A_post)
 
-  tau_post <- rnorm(T1, mean = mu_tau, sd = sd_tau)
-  Y01_post <- Y00_all[(T0 + 1):TT] + tau_post
+  # tau_post <- rnorm(T1, mean = mu_tau, sd = sd_tau)
+  # Y01_post <- Y00_all[(T0 + 1):TT] + tau_post
+  Y01_post <- rnorm(T1, mean = mu_tau, sd = sd_tau)
 
   Yc1_post <- matrix(NA_real_, T1, N)
   for (tt in 1:T1) {
@@ -330,15 +331,17 @@ run_one_sim <- function(
     numeric(1)
   ))
 
+  alpha_hat_bscm <- colMeans(alpha_draws_bscm)
+
   # --- SCSPILL（C++ サンプラの α・ρ を共同で使用）---
-  sar <- sar_full_sampler_cpp(
-    Y0_pre = Y0_pre,
+  sar <- sar_full_sampler_cpp_step2(
     Yc_pre = Yc_pre,
+    alpha_hat_in = alpha_hat_bscm, # ★ Step 1 の alpha_hat を渡す
     Xc_pre_ = if (K > 0) dgp$data$Xc_pre else NULL,
     T0 = T0,
     N = N,
     K = K,
-    p = 0,
+    p = 0, # シミュレーションは p=0 (因子なし) を仮定
     w_in = as.numeric(w),
     W = W,
     iteration = M,
@@ -349,21 +352,20 @@ run_one_sim <- function(
     verbose = FALSE
   )
 
-  rho_draws_joint <- as.numeric(sar$rho)
-  alpha_draws_joint <- as.matrix(sar$alpha) # M x N（C++ 側で元スケールに戻したもの）
+  rho_draws_step2 <- as.numeric(sar$rho)
 
-  # 反実仮想（w 正規化を C++ に揃える）
-  M_pair <- min(nrow(alpha_draws_joint), length(rho_draws_joint))
-  te_spill_mat <- matrix(NA_real_, nrow = T1, ncol = M_pair)
-  for (m in seq_len(M_pair)) {
+  M_rho <- length(rho_draws_step2)
+  te_spill_mat <- matrix(NA_real_, nrow = T1, ncol = M_rho)
+
+  for (m in seq_len(M_rho)) {
     ycf_m <- .scspill_cf_post(
       Y0_post = Y0_post,
       Yc_post = Yc_post,
       W = W,
       w = w,
-      alpha_hat = alpha_draws_joint[m, ],
-      rho_hat = rho_draws_joint[m],
-      normalize_w = TRUE # ★ C++ と揃える
+      alpha_hat = alpha_hat_bscm,
+      rho_hat = rho_draws_step2[m],
+      normalize_w = TRUE
     )
     te_spill_mat[, m] <- Y0_post - ycf_m
   }
@@ -417,7 +419,7 @@ run_one_sim <- function(
     truth = dgp$truth,
     draws = list(
       alpha_bscm = alpha_draws_bscm,
-      scspill_joint = list(alpha = alpha_draws_joint, rho = rho_draws_joint),
+      scspill_step2 = list(alpha_hat = alpha_hat_bscm, rho = rho_draws_step2),
       ate = list(bscm = ate_bscm_draws, scspill = ate_spill_draws)
     ),
     effects = list(

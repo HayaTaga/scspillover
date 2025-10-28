@@ -412,31 +412,162 @@ Rcpp::List sar_full_sampler_cpp(const arma::vec& Y0_pre,    // 未使用
     // ============================================================
     // (6) alpha | rest  — Blocked Independent MH
     // ============================================================
-    int current_acc_alpha_iter = 0;
-    for (int i = 0; i < N; ++i) {
-      double lcur_a = logpost_alpha(alpha); // 現在の対数事後
 
-      arma::vec prop_alpha = alpha;
-      double current_step_i = std::exp(log_step_alpha(i)); // i番目のステップ幅
-      prop_alpha(i) = alpha(i) + R::rnorm(0.0, current_step_i);
 
-      double lprp_a = logpost_alpha(prop_alpha); // 提案点の対数事後
+    arma::mat A = I_N - rho * W;
+    arma::mat A_inv;
+    double log_det_A, sign_A;
 
-      bool accepted_i = false;
-      double log_alpha_accept_i = lprp_a - lcur_a;
-      if (std::log(R::runif(0.0, 1.0)) < log_alpha_accept_i) {
-        alpha = prop_alpha; // ★★★ 受理されたら alpha ベクトル全体を更新 ★★★
-        accepted_i = true;
-        current_acc_alpha_iter++;
-      }
-
-      // --- i番目のステップ幅を適応 ---
-      double adapt_step_i = std::pow(it + 1.0, -adapt_gamma);
-      log_step_alpha(i) += adapt_step_i * ( (accepted_i ? 1.0 : 0.0) - target_accept_alpha );
-      // log_step_alpha(i) の範囲制限 (オプションだが推奨)
-      log_step_alpha(i) = std::max(-10.0, std::min(log_step_alpha(i), 3.0));
+    if (!arma::inv_sympd(A_inv, 0.5 * (A + A.t()))) {
+        arma::inv(A_inv, A); // fallback
     }
-    if (it >= burn) acc_alpha += current_acc_alpha_iter;
+    arma::log_det(log_det_A, sign_A, A);
+    if (!std::isfinite(log_det_A)) {
+        log_step_rho -= 0.1;
+        continue;
+    }
+
+    arma::vec b_vec = rho * (A_inv * w);
+
+    std::vector<arma::vec> R_t_vec(T0);
+    for (int t=0; t<T0; ++t) {
+        arma::vec R_t = A * Yc.row(t).t();
+        if (useX) R_t -= X_get_row(t) * beta0;
+        if (p>0)  R_t -= Eta * Gamma.col(t);
+        R_t_vec[t] = R_t;
+    }
+    
+    // -----------------------------------------------------------------
+    // (B) 高速な対数事後分布 (logpost) ヘルパー関数 (O(N) + O(T0*N))
+    // -----------------------------------------------------------------
+    
+    auto fast_logpost_alpha = [&](const arma::vec& a) -> double {
+        
+        double inner_prod = arma::dot(a, b_vec);
+        if (inner_prod >= 1.0 - 1e-9) return -std::numeric_limits<double>::infinity();
+        double ldetM = log_det_A + std::log(1.0 - inner_prod);
+        
+        double ss = 0.0;
+        arma::vec rho_w = rho * w;
+        for (int t=0; t<T0; ++t) {
+            double S_t = arma::dot(a, Yc.row(t).t());
+            arma::vec u = R_t_vec[t] - rho_w * S_t;
+            ss += arma::dot(u, u);
+        }
+        
+        // (B.3) 対数尤度
+        double ll = T0 * ldetM - 0.5 * (N*T0) * std::log(s2) - 0.5 * ss / s2;
+        if (!std::isfinite(ll)) return -std::numeric_limits<double>::infinity();
+
+        // (B.4) 対数事前分布 (Horseshoe)
+        double lp = 0.0;
+        for (int i=0;i<N;++i) {
+            double s2i = clip1(sigma2_i(i));
+            lp += -0.5 * std::log(s2i) - 0.5 * (a(i)*a(i))/s2i;
+        }
+        
+        return ll + lp;
+    };
+
+    // -----------------------------------------------------------------
+    // (C) ブロック MH サンプラー
+    // -----------------------------------------------------------------
+    
+    // (C.1) 提案分布 q(alpha) の構築
+    //  q ~ N(mu_q, Sig_q)
+    arma::vec inv_sigma2_i = 1.0 / clip_vec(sigma2_i);
+    arma::mat Syy(N, N, arma::fill::zeros);
+    arma::vec bq(N, arma::fill::zeros);
+
+    arma::vec rho_w = rho * w;
+    double rho_s2 = rho / clip1(s2);
+    
+    for (int t=0; t<T0; ++t) {
+        arma::vec y_t = Yc.row(t).t();
+        Syy += y_t * y_t.t();
+        
+        // R_t_vec[t] = (I-rho*W)Y_t - X_t*beta0 - Eta*Gamma_t
+        double wtR = arma::dot(w, R_t_vec[t]);
+        bq -= rho_s2 * (y_t * wtR);
+    }
+
+    arma::mat Prec = ((rho*rho * arma::dot(w,w)) / clip1(s2)) * Syy;
+    Prec.diag() += inv_sigma2_i;
+    Prec.diag() += 1e-4;
+    
+    arma::mat Prec_sym = 0.5*(Prec + Prec.t());
+    arma::mat Sig_q;
+    if (!arma::inv_sympd(Sig_q, Prec_sym)) {
+        Rcpp::warning("inv_sympd(Prec_sym) failed in alpha block MH. Using pinv.");
+        Sig_q = arma::pinv(Prec_sym);
+    }
+
+    arma::vec mu_q = Sig_q * bq;
+
+    arma::mat Sig_prop = c_alpha_scale * Sig_q;
+    arma::mat L_prop;
+    if (!robust_chol(L_prop, Sig_prop)) {
+        log_step_rho -= 0.01;
+        continue;
+    }
+
+    arma::vec z_draw = arma::randn<arma::vec>(N);
+    arma::vec alpha_prop = mu_q + L_prop * z_draw;
+
+    double lp_cur = fast_logpost_alpha(alpha);
+    double lp_prp = fast_logpost_alpha(alpha_prop);
+
+    arma::mat Prec_prop = (1.0 / c_alpha_scale) * Prec_sym;
+    auto log_q_eval = [&](const arma::vec& x)->double {
+        arma::vec diff = x - mu_q;
+        double quad = arma::as_scalar(diff.t() * Prec_prop * diff);
+        double ldPrec = logdet(Prec_sym);
+        double ldSig_prop = (double)N * std::log(c_alpha_scale) - ldPrec;
+        return -0.5 * ( quad + (double)N * log2pi + ldSig_prop );
+    };
+
+    double log_q_cur = log_q_eval(alpha);
+    double log_q_prp = log_q_eval(alpha_prop);
+
+    double log_acc_alpha = (lp_prp - lp_cur) + (log_q_cur - log_q_prp);
+    
+    bool accepted_alpha = false;
+    if (std::log(R::runif(0.0, 1.0)) < log_acc_alpha) {
+        alpha = alpha_prop;
+        accepted_alpha = true;
+    }
+    
+    // (C.3) 受理率の記録 (ブロック全体で 1 or 0)
+    if (it >= burn) {
+        if (accepted_alpha) acc_alpha++;
+    }
+
+    // int current_acc_alpha_iter = 0;
+    
+    // for (int i = 0; i < N; ++i) {
+    //   double lcur_a = logpost_alpha(alpha); // 現在の対数事後
+
+    //   arma::vec prop_alpha = alpha;
+    //   double current_step_i = std::exp(log_step_alpha(i)); // i番目のステップ幅
+    //   prop_alpha(i) = alpha(i) + R::rnorm(0.0, current_step_i);
+
+    //   double lprp_a = logpost_alpha(prop_alpha); // 提案点の対数事後
+
+    //   bool accepted_i = false;
+    //   double log_alpha_accept_i = lprp_a - lcur_a;
+    //   if (std::log(R::runif(0.0, 1.0)) < log_alpha_accept_i) {
+    //     alpha = prop_alpha; // ★★★ 受理されたら alpha ベクトル全体を更新 ★★★
+    //     accepted_i = true;
+    //     current_acc_alpha_iter++;
+    //   }
+
+    //   // --- i番目のステップ幅を適応 ---
+    //   double adapt_step_i = std::pow(it + 1.0, -adapt_gamma);
+    //   log_step_alpha(i) += adapt_step_i * ( (accepted_i ? 1.0 : 0.0) - target_accept_alpha );
+    //   // log_step_alpha(i) の範囲制限 (オプションだが推奨)
+    //   log_step_alpha(i) = std::max(-10.0, std::min(log_step_alpha(i), 3.0));
+    // }
+    // if (it >= burn) acc_alpha += current_acc_alpha_iter;
 //     {
 //       // 準備:
 //       //   Prec_q = (rho^2 * ||w||^2 / s2) * Σ_t (y_t y_t') + Diag(1/σ_i^2)

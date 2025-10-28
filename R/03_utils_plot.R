@@ -464,8 +464,12 @@ plot.scspill <- function(
 
   # -------- spill_top: 上位ユニットのスピル --------
   if (type == "spill_top") {
-    td <- tidy_scspill(x, time_col = time_col)
-    df <- td$spill
+    # td <- tidy_scspill(x, time_col = time_col)
+    # df <- td$spill
+    cf <- scspill_counterfactual(x, cred = cred, time_col = time_col)
+    df <- subset(cf, period == "post", select = c(time, y_cf_lo, y_cf_hi))
+    df$mean <- (df$y_cf_lo + df$y_cf_hi) / 2
+    df$.idx <- seq_len(nrow(df))
 
     if (!nrow(df)) {
       stop(

@@ -112,11 +112,13 @@ mc_grid_study <- function(
     T0 <- grid$T0[i]
     rho <- grid$rho[i]
 
+    cat(sprintf("Now: N=%f, T0=%f, rho=%f", N, T0, rho), "\n")
+
     # N は正方格子前提（論文の体裁を踏襲）。
     m <- round(sqrt(N))
     if (m * m != N) {
       stop(sprintf(
-        "N=%d は完全平方数ではありません（%d×%dにできません）。",
+        "N=%d は完全平方数ではありません（%dx%dにできません）。",
         N,
         m,
         m
@@ -150,14 +152,17 @@ mc_grid_study <- function(
     )
 
     # 多回実行
-    out <- run_scenario_many(
-      n_sims = sims_per,
-      dgp_args = dgp_args,
-      seeds = get_seeds_i(i),
-      M = M,
-      burn = burn,
-      step_rho = step_rho
-    )
+    time_result <- system.time({
+      out <- run_scenario_many(
+        n_sims = sims_per,
+        dgp_args = dgp_args,
+        seeds = get_seeds_i(i),
+        M = M,
+        burn = burn,
+        step_rho = step_rho
+      )
+    })
+    print(time_result)
 
     # シナリオ情報を列として付与
     smry <- out$summary
@@ -198,16 +203,24 @@ mc_grid_study <- function(
 }
 
 study <- mc_grid_study(
-  Ns = c(16, 36, 64), # 4x4, 6x6
+  # Ns = c(16, 36, 64), # 4x4, 6x6
+  Ns = c(16),
   T0s = c(20, 50),
-  rhos = c(0.0, 0.3, 0.8, -0.3, -0.8),
+  # T0s = c(20),
+  # rhos = c(0.0, 0.3, 0.8, -0.3, -0.8),
+  rhos = c(0.3),
   T1 = 10,
   sims_per = 1000, # 各シナリオ100反復
   K = 1,
   beta = c(1.0),
   sigma2 = 1.0,
   treated_idx = 1:4, # 例と同じ設定
-  M = 2500,
-  burn = 1000,
+  M = 25000,
+  burn = 10000,
   step_rho = 0.02
 )
+
+# simulation_study_20251027 <- study
+# usethis::use_data(simulation_study_20251027)
+# load('./data/simulation_study_20251027.rda')
+# simulation_study_20251027

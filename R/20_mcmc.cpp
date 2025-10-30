@@ -92,7 +92,6 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
 
   for (int iter = 1; iter <= iters; ++iter) {
     if (verbose && (iter % 2000 == 0)) {
-      Rcpp::Rcout << "Now, iteration = " << iter << "\n";
       Rcpp::checkUserInterrupt();
     }
 
@@ -283,30 +282,18 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
       AYc_vec[t] = A_const * Yc.row(t).t();
   }
   // ------------------------------------------------------------------
-
-
-  // Mtilde は使わなくなったのでコメントアウト (または削除)
-  // auto Mtilde = [&](double r)->arma::mat {
-  //   return I_N - r * W - r * w * alpha.t();
-  // };
-
-  // ★★★ 高速化された loglik_core_pair (O(T0*N) に) ★★★
   auto loglik_core_pair = [&](double r)->std::pair<double,double> {
     if (std::abs(r) >= bnd) return {-std::numeric_limits<double>::infinity(), 0.0};
 
-    // (1) 高速な log|det| (O(N))
     double ldetM = 0.0;
     for (arma::uword i = 0; i < evals_A.n_elem; ++i) {
         ldetM += std::log(std::complex<double>(1.0, 0.0) - r * evals_A(i)).real();
     }
     if (!std::isfinite(ldetM)) return {-std::numeric_limits<double>::infinity(), 0.0};
 
-    // (2) 高速な残差平方和 (ss) (O(T0*N))
     double ss = 0.0;
     for (int t=0; t<T0; ++t) {
-      // u_t = (I - rho*A)*Yc_t - Xb - Lf
-      // u_t = Yc_t - rho*(A*Yc_t) - Xb - Lf
-      arma::vec u = Yc.row(t).t() - r * AYc_vec[t]; // ★ O(N)
+      arma::vec u = Yc.row(t).t() - r * AYc_vec[t];
       if (useX)  u -= X_get_row(t) * beta;
       if (p>0)   u -= Eta * Gamma.col(t);
       ss += arma::dot(u,u);
@@ -466,24 +453,44 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     nu_sigma2 = rinvgamma(1.0, 1.0/clip1(s2) + 1.0/100.0);
 
     // (5) rho | rest (Adaptive RWMH)
-    {
-      double current_step = std::exp(log_step_rho);
-      double prop_rho = R::rnorm(rho, current_step);
+    // {
+    //   double current_step = std::exp(log_step_rho);
+    //   double prop_rho = R::rnorm(rho, current_step);
 
-      // ★ 修正: 高速化された loglik_core_pair (O(T0*N)) を使用
-      double lcur = loglik_core_pair(rho).first;
-      double lprp = loglik_core_pair(prop_rho).first;
+    //   // ★ 修正: 高速化された loglik_core_pair (O(T0*N)) を使用
+    //   double lcur = loglik_core_pair(rho).first;
+    //   double lprp = loglik_core_pair(prop_rho).first;
 
-      bool accepted = false;
-      double loga = lprp - lcur;
-      if (std::log(R::runif(0.0,1.0)) < loga) {
+    //   bool accepted = false;
+    //   double loga = lprp - lcur;
+    //   if (std::log(R::runif(0.0,1.0)) < loga) {
+    //     rho = prop_rho;
+    //     accepted = true;
+    //     if (it >= burn) acc_rho++;
+    //   }
+    //   double adapt_step = std::pow(it + 1.0, -adapt_gamma);
+    //   log_step_rho += adapt_step * ((accepted ? 1.0 : 0.0) - target_accept_rho);
+    //   log_step_rho = std::max(-10.0, std::min(log_step_rho, 3.0));
+    // }
+        {
+    const double lcur = loglik_core_pair(rho).first;
+
+    // 提案: rho' = rho + c * N(0,1)
+    const double prop_rho = rho + step_rho * R::rnorm(0.0, 1.0);
+
+    double lprp = loglik_core_pair(prop_rho).first;
+    if (!std::isfinite(lprp)) {
+        lprp = -std::numeric_limits<double>::infinity();
+    }
+
+    // （事前がある場合はここで加える）
+    // const double loga = (lprp + logprior_rho(prop_rho)) - (lcur + logprior_rho(rho));
+    const double loga = lprp - lcur;
+
+    if (std::log(R::runif(0.0, 1.0)) < loga) {
         rho = prop_rho;
-        accepted = true;
         if (it >= burn) acc_rho++;
-      }
-      double adapt_step = std::pow(it + 1.0, -adapt_gamma);
-      log_step_rho += adapt_step * ((accepted ? 1.0 : 0.0) - target_accept_rho);
-      log_step_rho = std::max(-10.0, std::min(log_step_rho, 3.0));
+    }
     }
 
     // store

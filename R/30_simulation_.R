@@ -4,11 +4,11 @@
 `%||%` <- function(x, y) if (!is.null(x)) x else y
 
 .q025q975 <- function(x) {
-  stats::quantile(x, c(0.025, 0.975), names = FALSE, type = 8)
+  stats::quantile(x, c(0.025, 0.975), names = FALSE)
 }
 
 # rook 型の隣接行列（行標準化）
-rook_W <- function(nrow, ncol, normalize = TRUE) {
+rook_W <- function(nrow, ncol, normalize = FALSE) {
   N <- nrow * ncol
   nb <- matrix(0, N, N)
   id <- function(r, c) (r - 1L) * ncol + c
@@ -40,27 +40,36 @@ make_w <- function(N, treated = 1L) {
   w
 }
 
+normalize_joint_wW <- function(W, w) {
+  stopifnot(is.matrix(W))
+  stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))
+
+  N <- nrow(W)
+  joint <- cbind(w, W)
+
+  rs <- rowSums(joint)
+  rs[rs == 0] <- 1
+
+  joint_norm <- joint / rs
+
+  w_new <- joint_norm[, 1, drop = TRUE]
+  W_new <- joint_norm[, -1, drop = FALSE]
+
+  list(W_new = W_new, w_new = w_new)
+}
+
 .scspill_cf_post <- function(
   Y0_post,
   Yc_post,
   W,
   w,
   alpha_hat,
-  rho_hat,
-  normalize_w = TRUE
+  rho_hat
 ) {
   N <- length(alpha_hat)
   IN <- diag(N)
 
-  w_use <- if (normalize_w) {
-    s <- sqrt(sum(w^2))
-    if (!is.finite(s) || s < 1e-12) {
-      s <- 1
-    }
-    as.numeric(w) / s
-  } else {
-    as.numeric(w)
-  }
+  w_use <- w / sum(w)
 
   Ainv <- solve(IN - rho_hat * (w_use %*% t(alpha_hat) + W))
   B <- (IN - rho_hat * W)
@@ -143,8 +152,12 @@ scspill_sim_dgp <- function(
 
   IN <- diag(N)
 
+  joint_norm <- normalize_joint_wW(W, w)
+  W_use <- joint_norm$W_new
+  w_use <- joint_norm$w_new
+
   # (A) no-treatment
-  A_pre <- IN - rho * W - rho * (w %*% t(alpha))
+  A_pre <- IN - rho * W_use - rho * (w_use %*% t(alpha))
   rcA <- tryCatch(rcond(A_pre), error = function(e) NA_real_)
   if (!is.finite(rcA) || rcA < 1e-10) {
     stop("A_pre is near singular.")
@@ -182,21 +195,20 @@ scspill_sim_dgp <- function(
   }
 
   # (B) post: treatment shock & SAR
-  A_post <- IN - rho * W
+  A_post <- IN - rho * W_use
   rcB <- tryCatch(rcond(A_post), error = function(e) NA_real_)
   if (!is.finite(rcB) || rcB < 1e-10) {
     stop("A_post is near singular.")
   }
   A_post_inv <- solve(A_post)
 
-  # tau_post <- rnorm(T1, mean = mu_tau, sd = sd_tau)
-  # Y01_post <- Y00_all[(T0 + 1):TT] + tau_post
-  Y01_post <- rnorm(T1, mean = mu_tau, sd = sd_tau)
+  tau_post <- rnorm(T1, mean = mu_tau, sd = sd_tau)
+  Y01_post <- Y00_all[(T0 + 1):TT] + tau_post
 
   Yc1_post <- matrix(NA_real_, T1, N)
   for (tt in 1:T1) {
     Xt <- if (K > 0) matrix(X_post[tt, , , drop = FALSE], N, K) else NULL
-    rhs <- rho * w * Y01_post[tt]
+    rhs <- rho * w_use * Y01_post[tt]
     if (K > 0) {
       rhs <- rhs + as.numeric(Xt %*% beta)
     }
@@ -237,8 +249,8 @@ scspill_sim_dgp <- function(
       tau_post = Y0_post - Y00_all[(T0 + 1):TT],
       y0_cf_post = Y00_all[(T0 + 1):TT]
     ),
-    W = W,
-    w = w,
+    W = W_use,
+    w = w_use,
     dims = list(T0 = T0, T1 = T1, N = N, K = K)
   )
 }
@@ -353,60 +365,97 @@ run_one_sim <- function(
   )
 
   rho_draws_step2 <- as.numeric(sar$rho)
-
   M_rho <- length(rho_draws_step2)
-  te_spill_mat <- matrix(NA_real_, nrow = T1, ncol = M_rho)
 
-  for (m in seq_len(M_rho)) {
-    ycf_m <- .scspill_cf_post(
-      Y0_post = Y0_post,
-      Yc_post = Yc_post,
-      W = W,
-      w = w,
-      alpha_hat = alpha_hat_bscm,
-      rho_hat = rho_draws_step2[m],
-      normalize_w = TRUE
-    )
-    te_spill_mat[, m] <- Y0_post - ycf_m
-  }
-  te_spill_mean <- rowMeans(te_spill_mat)
-  ate_spill_draws <- colMeans(te_spill_mat)
-  ate_spill_mean <- mean(te_spill_mean)
-  ci_ate_spill <- .q025q975(ate_spill_draws)
-  cover_ate_spill <- as.numeric(
-    ci_ate_spill[1] <= ate_true && ate_true <= ci_ate_spill[2]
-  )
-  cover_pt_spill <- mean(vapply(
-    seq_len(T1),
-    function(t) {
-      ci <- .q025q975(te_spill_mat[t, ])
-      as.numeric(ci[1] <= te_true[t] && te_true[t] <= ci[2])
+  # 全ドローの時点別処置効果（T1 × M_rho）
+  te_spill_mat <- vapply(
+    rho_draws_step2,
+    function(rh) {
+      ycf_m <- .scspill_cf_post(
+        Y0_post = Y0_post,
+        Yc_post = Yc_post,
+        W = W,
+        w = w,
+        alpha_hat = alpha_hat_bscm, # Step1 の固定α
+        rho_hat = rh
+      )
+      Y0_post - ycf_m
     },
-    numeric(1)
+    FUN.VALUE = numeric(T1)
+  )
+
+  # 1) 各時点の事後平均（推定量）と 95% CI、被覆
+  te_spill_mean <- rowMeans(te_spill_mat) # 事後平均（時点別推定量）
+  te_spill_ci <- t(apply(
+    te_spill_mat,
+    1,
+    stats::quantile,
+    probs = c(0.025, 0.975)
   ))
+  colnames(te_spill_ci) <- c("lower", "upper")
+  cover_pt_spill_vec <- as.numeric(
+    te_spill_ci[, "lower"] <= te_true &
+      te_true <= te_spill_ci[, "upper"]
+  )
+  cover_pt_spill <- mean(cover_pt_spill_vec)
+
+  # 2) ATE の事後（各ドローで平均を取り、その分布からCI/被覆）
+  ate_spill_draws <- colMeans(te_spill_mat) # 各ドローの ATE
+  ate_spill_mean <- mean(ate_spill_draws) # ATE の事後平均
+  ci_ate_spill <- stats::quantile(
+    ate_spill_draws,
+    c(0.025, 0.975),
+    names = FALSE
+  )
+  cover_ate_spill <- as.numeric(
+    ci_ate_spill[1] <= mean(te_true) &
+      mean(te_true) <= ci_ate_spill[2]
+  )
+
+  # 3) 「保存すべき」各時点の MSE/Bias（Python: te_true - mean を使う）
+  mse_spill_time <- (te_true - te_spill_mean)^2
+  bias_spill_time <- (te_true - te_spill_mean)
 
   # --- metrics（SCM の coverage は NA）---
   effect_metrics <- function(te_hat, te_true) {
     c(
-      bias_ate = mean(te_hat) - mean(te_true),
-      rmse_ate = sqrt(mean((mean(te_hat) - mean(te_true))^2)),
-      bias_point = mean(te_hat - te_true),
-      rmse_point = sqrt(mean((te_hat - te_true)^2))
+      bias_point = mean(te_true - te_hat), # 時間平均バイアス
+      mse_point = mean((te_true - te_hat)^2) # 時間平均MSE（rootはまだ取らない）
     )
   }
+
+  # ---- SCM ----
+  met_SCM <- effect_metrics(te_scm, te_true)
+  # ---- BSCM ----
+  met_BSCM <- effect_metrics(te_bscm_mean, te_true)
+  # ---- SCSPILL ----
+  met_SP <- effect_metrics(te_spill_mean, te_true)
+
+  # ATE は誤差をそのまま保持（平方根はsummarize_many側）
+  ate_true_scalar <- mean(te_true)
+  ate_err_SCM <- ate_true_scalar - ate_scm
+  ate_err_BSCM <- ate_true_scalar - ate_bscm_mean
+  ate_err_SP <- ate_true_scalar - ate_spill_mean
+
   metrics <- rbind(
     SCM = c(
-      effect_metrics(te_scm, te_true),
-      cover95_ate = NA_real_,
+      bias_ate = ate_err_SCM,
+      mse_ate = ate_err_SCM^2, # ATEのMSE
+      met_SCM, # bias_point, mse_point
+      cover95_ate = NA_real_, # SCMは事後分布なし
       cover95_point = NA_real_
     ),
     BSCM = c(
-      effect_metrics(te_bscm_mean, te_true),
+      bias_ate = ate_err_BSCM,
+      mse_ate = ate_err_BSCM^2,
+      met_BSCM,
       cover95_ate = cover_ate_bscm,
       cover95_point = cover_pt_bscm
     ),
     SCSPILL = c(
-      effect_metrics(te_spill_mean, te_true),
+      bias_ate = ate_err_SP,
+      mse_ate = ate_err_SP^2,
+      met_SP,
       cover95_ate = cover_ate_spill,
       cover95_point = cover_pt_spill
     )
@@ -415,12 +464,63 @@ run_one_sim <- function(
   metrics$method <- rownames(metrics)
   rownames(metrics) <- NULL
 
+  # 事後平均パス
+  per_time_mean <- list(
+    true = te_true,
+    scm = te_scm,
+    bscm = te_bscm_mean,
+    scspill = te_spill_mean
+  )
+
+  # 各時点の二乗誤差（MSE の素材）
+  per_time_mse <- list(
+    scm = (te_true - te_scm)^2,
+    bscm = (te_true - te_bscm_mean)^2,
+    scspill = (te_true - te_spill_mean)^2
+  )
+
+  # 各時点のバイアス
+  per_time_bias <- list(
+    scm = te_true - te_scm,
+    bscm = te_true - te_bscm_mean,
+    scspill = te_true - te_spill_mean
+  )
+
+  # 各時点のCIと被覆指標（BSCM/SCSPILL）
+  bscm_ci <- t(apply(te_bscm_mat, 1, stats::quantile, probs = c(0.025, 0.975)))
+  spill_ci <- t(apply(
+    te_spill_mat,
+    1,
+    stats::quantile,
+    probs = c(0.025, 0.975)
+  ))
+  per_time_ci <- list(
+    bscm = list(
+      lower = bscm_ci[, 1],
+      upper = bscm_ci[, 2],
+      cover = as.numeric(bscm_ci[, 1] <= te_true & te_true <= bscm_ci[, 2])
+    ),
+    scspill = list(
+      lower = spill_ci[, 1],
+      upper = spill_ci[, 2],
+      cover = as.numeric(spill_ci[, 1] <= te_true & te_true <= spill_ci[, 2])
+    )
+  )
+
+  # 返り値に追加
   list(
     truth = dgp$truth,
     draws = list(
       alpha_bscm = alpha_draws_bscm,
       scspill_step2 = list(alpha_hat = alpha_hat_bscm, rho = rho_draws_step2),
-      ate = list(bscm = ate_bscm_draws, scspill = ate_spill_draws)
+      ate = list(bscm = ate_bscm_draws, scspill = ate_spill_draws),
+      te_path = list(bscm = te_bscm_mat, scspill = te_spill_mat) # フル行列も保持
+    ),
+    per_time = list(
+      mean = per_time_mean,
+      mse = per_time_mse,
+      bias = per_time_bias,
+      ci = per_time_ci
     ),
     effects = list(
       true = te_true,
@@ -462,21 +562,17 @@ summarize_many <- function(results) {
   stopifnot(is.list(results), length(results) > 0)
   tab <- do.call(rbind, lapply(results, function(r) r$metrics))
 
-  # 欲しい列
   keep <- c(
     "bias_ate",
-    "rmse_ate",
+    "mse_ate",
     "bias_point",
-    "rmse_point",
+    "mse_point",
     "cover95_ate",
     "cover95_point"
   )
-
-  # method を3手法の固定レベルに
   lev <- c("SCM", "BSCM", "SCSPILL")
   tab$method <- factor(tab$method, levels = lev)
 
-  # 平均とSD（全NAなら NA を返す）
   safe_mean <- function(x) {
     if (all(is.na(x))) NA_real_ else mean(x, na.rm = TRUE)
   }
@@ -496,7 +592,11 @@ summarize_many <- function(results) {
 
   out <- merge(agg_mean, agg_sd, by = "method", all = TRUE)
 
-  # 3手法が必ず並ぶよう整列
+  # ★ ここで「モンテカルロ平均後に平方根」を取って RMSE を作る
+  out$rmse_ate <- sqrt(out$mse_ate)
+  out$rmse_point <- sqrt(out$mse_point)
+
+  # 表示上、MSEは残しても削っても構いません（残しておくと検算しやすい）
   out$method <- factor(out$method, levels = lev)
   out <- out[order(as.integer(out$method)), , drop = FALSE]
   rownames(out) <- NULL

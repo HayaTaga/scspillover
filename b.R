@@ -39,10 +39,10 @@ fit <- sc_spillover(
   y = "cigsale", # 例: アウトカム列が "smoking_rate" の場合
   X = c("retprice"), # 共変量（列名ベクトル）
   p_factors = 1, # Appendixの因子レイヤを1つ使用
-  M = 10000,
-  burn = 5000,
+  M = 50000,
+  burn = 25000,
   seed = 20251022,
-  step_rho = 0.03,
+  step_rho = 0.1,
   unit_col = "state",
   time_col = "year"
 )
@@ -71,71 +71,43 @@ diag_tab <- attr(p, "summary")
 diag_tab[order(diag_tab$ess, decreasing = TRUE), ]
 
 
-set.seed(1)
-N <- 16L
-K <- 0L
-p <- 0L
-T0 <- 12L
+load("./data/sudan_secession_latest.rda")
 
-# Ring adjacency, row-stochastic W
-W <- matrix(0, N, N)
-diag(W) <- 0
-for (i in 1:N) {
-  j <- if (i < N) i + 1 else 1
-  W[i, j] <- 1
-}
-W <- W / rowSums(W)
+panel_df <- sudan_secession_latest$panel
+w_vec <- sudan_secession_latest$w
+W_mat <- sudan_secession_latest$W
+panel_df <- panel_df %>%
+  mutate(
+    treatment = ifelse((country == "Sudan") & (year >= 2011), 1, 0)
+  )
 
-# w: unit vector selecting the 2nd control
-w <- rep(0, N)
-w[2] <- 1
+w <- as.matrix(w_vec[, 2])
+W <- as.matrix(W_mat[, -1])
 
-# Pre-treatment treated outcome Y0_pre: AR(1) with phi=0.6
-Y0_pre <- numeric(T0)
-eps <- rnorm(T0, 0, 1)
-phi <- 0.6
-Y0_pre[1] <- eps[1]
-for (t in 2:T0) {
-  Y0_pre[t] <- phi * Y0_pre[t - 1] + eps[t]
-}
-
-# No regressors in this example
-Xc <- NULL
-
-out <- geweke_jdt(
-  Y0_pre,
-  W,
-  w,
-  Xc = Xc,
-  p = p,
-  M1 = 10000,
-  M2 = 10000, # 推奨規模は適宜調整
-  a0 = 1,
-  b0 = 1, # sigma^2 の IG 事前
-  step_rho = 0.01, # 既存 RW-MH の提案幅
-  g_fn = robust_g_fn, # 必要に応じて差し替え可
-  verbose = TRUE
+fit <- sc_spillover(
+  data = panel_df,
+  treated_unit = "Sudan",
+  w = w,
+  W = W,
+  treatment_dummy = "treatment",
+  y = colnames(panel_df)[11],
+  X = colnames(panel_df)[4:10],
+  p_factors = 1,
+  M = 5000,
+  burn = 2500,
+  seed = 20251022,
+  step_rho = 0.1,
+  unit_col = "country",
+  time_col = "year"
 )
 
-out$summary # g ごとの平均・SE・Z・p 値
-
-# baseline estimation
-library(spdep)
-library(splm)
-
-lw <- mat2listw(W, style = "W")
-lw
-
-df_long <- panel_df %>% filter(state_id != 0)
-
-sar_pool <- spml(
-  cigsale ~ retprice,
-  data = df_long,
-  index = c("state_id", "year"),
-  listw = lw,
-  model = "pooling",
-  lag = TRUE,
-  spatial.error = "none",
-  method = "eigne"
+plot(fit, time_col = "year")
+plot(fit, type = "spill_top", top_n = 8, time_col = "year")
+p <- diagnostics.scspill(
+  fit,
+  which_alpha = NULL,
+  top_n_alpha = 6,
+  which_beta = NULL,
+  top_n_beta = 6
 )
-summary(sar_pool)
+print(p)

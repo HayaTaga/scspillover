@@ -1,9 +1,3 @@
-# =========================================================
-# sc_spillover(): 二段階推定版
-#   Step1: hs_alpha_gibbs_cpp で alpha を推定
-#   Step2: sar_full_sampler_cpp_step2 で alpha_hat 固定の下で rho 等を推定
-# 効果は alpha_hat を固定し、rho の事後のみ反映
-# =========================================================
 sc_spillover <- function(
   data,
   treated_unit,
@@ -20,15 +14,14 @@ sc_spillover <- function(
   unit_col = "unit",
   time_col = "time",
   treatment_dummy,
-  step_rho = 0.05,
-  step_alpha = 0.05 # 互換性のため残置（本関数では未使用）
+  step_rho = 0.05
 ) {
   stopifnot(is.data.frame(data))
   if (!is.character(y)) {
     y <- as.character(substitute(y))
   }
 
-  # 必須列
+  # 必須列チェック
   required_cols <- c(unit_col, time_col, y, treatment_dummy)
   if (!all(required_cols %in% names(data))) {
     stop(sprintf(
@@ -37,7 +30,7 @@ sc_spillover <- function(
     ))
   }
 
-  # Rcpp 実装のロード（未ロードなら）
+  # Rcpp 実装のロード
   if (!exists("hs_alpha_gibbs_cpp") || !exists("sar_full_sampler_cpp_step2")) {
     if (file.exists("20_mcmc.cpp")) {
       Rcpp::sourceCpp("20_mcmc.cpp")
@@ -52,7 +45,7 @@ sc_spillover <- function(
 
   set.seed(seed)
 
-  # 介入開始の同定 → T0
+  # 介入開始期から T0 を決める
   times <- sort(unique(data[[time_col]]))
   treat_series <- data[
     data[[unit_col]] == treated_unit,
@@ -61,7 +54,7 @@ sc_spillover <- function(
   t_start <- min(treat_series[[time_col]][treat_series[[treatment_dummy]] == 1])
   T0 <- if (is.null(T0)) sum(times < t_start) else as.integer(T0)
 
-  # 前処理（Y0/Yc と X の整形）
+  # 整形 (Y0_pre, Yc_pre, ...) を得る
   prep <- scspill_prep_X(
     data,
     treated_unit = treated_unit,
@@ -72,21 +65,21 @@ sc_spillover <- function(
     time_col = time_col
   )
 
-  # 行標準化（ゼロ割りロバスト実装を想定）
-  W <- row_normalize(W)
-  # w は Step2 側（C++）で **L2 正規化**されます。ここでは触れません。
+  joint_norm <- normalize_joint_wW(W, w)
+  W_use <- joint_norm$W_new
+  w_use <- joint_norm$w_new
 
   Y0_pre <- prep$Y0_pre
   Yc_pre <- prep$Yc_pre
   Y0_post <- prep$Y0_post
   Yc_post <- prep$Yc_post
   Xc_pre <- prep$Xc_pre
+
   N <- ncol(Yc_pre)
   T1 <- nrow(Yc_post)
 
   #--------------------------------------
   # Step 1: BSCM による alpha の推定
-  #   Y0_t = alpha' Yc_t + v_t, HS 事前
   #--------------------------------------
   if (verbose) {
     message("[Step 1] Sampling alpha via BSCM (horseshoe prior)...")
@@ -102,13 +95,13 @@ sc_spillover <- function(
   alpha_hat <- colMeans(alpha_draws)
 
   #--------------------------------------
-  # Step 2: \u03B1̂ 固定で SCSPILL の \u03C1 等を推定
-  #  (I - rho W - rho w alpha^T) Yc_t = X_t beta + Lambda F_t + u_t
+  # Step 2: α̂ 固定で rho 等を推定
   #--------------------------------------
   if (verbose) {
     message("[Step 2] Sampling rho (and others) with fixed alpha_hat...")
   }
-  # X の受け渡し：NULL か、長さ T0*N*K のベクトル
+
+  # X の整形
   K <- 0L
   Xvec <- NULL
   if (!is.null(Xc_pre)) {
@@ -117,33 +110,27 @@ sc_spillover <- function(
       stopifnot(dim(Xc_pre)[1] == T0, dim(Xc_pre)[2] == N)
       Xvec <- as.numeric(aperm(Xc_pre, c(1, 2, 3)))
     } else {
-      # すでにベクトル化されているとみなす
-      # K は外側から与えられていないので 0/非0 の整合は scspill_prep_X 側に依存
       Xvec <- as.numeric(Xc_pre)
-      K <- length(Xvec) / (T0 * N)
-      if (abs(K - round(K)) > 1e-8) {
+      Ktmp <- length(Xvec) / (T0 * N)
+      if (abs(Ktmp - round(Ktmp)) > 1e-8) {
         stop("Xc_pre の次元が (T0*N*K) に整合しません。")
       }
-      K <- as.integer(round(K))
+      K <- as.integer(round(Ktmp))
     }
   }
 
-  w_l2 <- as.numeric(w)
-  s <- sqrt(sum(w_l2^2))
-  if (s > 0) {
-    w_l2 <- w_l2 / s
-  }
+  w_l2 <- as.numeric(w_use)
 
   sar <- sar_full_sampler_cpp_step2(
     Yc_pre = Yc_pre,
-    alpha_hat = alpha_hat, # ★ 固定して渡す（C++ 側で Yc スケールと整合）
+    alpha_hat_in = alpha_hat,
     Xc_pre_ = if (!is.null(Xvec)) Xvec else R_NilValue,
     T0 = T0,
     N = N,
     K = K,
     p = as.integer(p_factors),
-    w_in = as.numeric(w_l2),
-    W = as.matrix(W),
+    w_in = w_l2,
+    W = as.matrix(W_use),
     iteration = M,
     burn = burn,
     step_rho = step_rho,
@@ -157,19 +144,12 @@ sc_spillover <- function(
 
   #--------------------------------------
   # 事後効果（alpha_hat 固定、rho の不確実性のみ）
-  #   y_cf,t = alpha_hat' * (I - rho*(W + w alpha_hat'))^{-1}
-  #            * [ (I - rho W) Yc_post,t - rho w Y0_post,t ]
   #--------------------------------------
   IN <- diag(N)
-  w_l2 <- as.numeric(w)
-  wn <- sqrt(sum(w_l2 * w_l2))
-  if (wn > 0) {
-    w_l2 <- w_l2 / wn
-  }
 
   cf_one_rho <- function(rho) {
-    Ainv <- solve(IN - rho * (W + w_l2 %*% t(alpha_hat)))
-    B <- (IN - rho * W)
+    Ainv <- solve(IN - rho * (W_use + w_l2 %*% t(alpha_hat)))
+    B <- (IN - rho * W_use)
     ycf <- numeric(T1)
     for (t in seq_len(T1)) {
       tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho * w_l2 * Y0_post[t])
@@ -179,44 +159,31 @@ sc_spillover <- function(
   }
 
   spill_one_rho <- function(rho) {
-    # Y_cf = (I - rho*W - rho*w*a')^{-1} * [ (I - rho*W)Yc - rho*w*Y0 ]
-    
-    # M_obs_inv = (I - rho*W - rho*w*a')^{-1}
-    M_obs_inv <- solve(IN - rho * (W + w_l2 %*% t(alpha_hat)))
-    
-    # B = (I - rho*W)
-    B <- (IN - rho * W)
-    
+    M_obs_inv <- solve(IN - rho * (W_use + w_l2 %*% t(alpha_hat)))
+    B <- (IN - rho * W_use)
+
     Yc_post_cf <- matrix(NA_real_, nrow = T1, ncol = N)
     for (t in seq_len(T1)) {
-      # Yc_post_cf[t, ] = M_obs_inv %*% ( B %*% Yc_post[t, ] - rho * w_l2 * Y0_post[t] )
-      
-      # (cf_one_rho と同じ計算)
       tmp <- M_obs_inv %*% (B %*% Yc_post[t, ] - rho * w_l2 * Y0_post[t])
       Yc_post_cf[t, ] <- as.numeric(tmp)
     }
-    
-    # Spillover = Y_obs - Y_cf
+
     spill_effect <- Yc_post - Yc_post_cf
     spill_effect
   }
 
-  # 点推定（rho_hat）
   ycf_point <- cf_one_rho(rho_hat)
   te_point <- as.numeric(Y0_post - ycf_point)
   ate_point <- mean(te_point)
 
   spill_draws_list <- lapply(rho_draws, spill_one_rho)
-  # (T1 x N x M) の配列に変換
   spill_draws_array <- array(
-    unlist(spill_draws_list), 
+    unlist(spill_draws_list),
     dim = c(T1, N, length(rho_draws))
   )
-
   spill_mean_matrix <- apply(spill_draws_array, c(1, 2), mean, na.rm = TRUE)
-  colnames(spill_mean_matrix) <- colnames(Yc_post) # ユニット名を付与
+  colnames(spill_mean_matrix) <- colnames(Yc_post)
 
-  # ATE の 95% CI（rho のみ回して近似）
   ate_draws <- vapply(
     rho_draws,
     function(r) {
@@ -227,19 +194,16 @@ sc_spillover <- function(
   ate_ci95 <- stats::quantile(
     ate_draws,
     c(0.025, 0.975),
-    names = FALSE,
-    type = 8
+    names = FALSE
   )
 
-  # 必要最小の効果要約を返す
   eff <- list(
-    te_point = te_point, # T1-vector
-    ate_point = ate_point, # scalar
-    ate_ci95 = ate_ci95, # length-2
+    te_point = te_point,
+    ate_point = ate_point,
+    ate_ci95 = ate_ci95,
     spill = spill_mean_matrix
   )
 
-  # 出力を従来の形に合わせて構築
   inputs <- list(
     Y0_pre = Y0_pre,
     Y0_post = Y0_post,
@@ -248,52 +212,40 @@ sc_spillover <- function(
     times_pre = prep$times_pre,
     times_post = prep$times_post,
     units = prep$units,
-    w = as.matrix(w),
-    W = as.matrix(W)
+    w = as.matrix(w_use),
+    W = as.matrix(W_use)
   )
 
   structure(
     list(
-      alpha_draws = alpha_draws, # Step1 の M x N
-      rho_draws = rho_draws, # Step2 の M
-      alpha_hat = alpha_hat, # colMeans(alpha_draws)
-      rho_hat = rho_hat, # mean(rho_draws)
-      effects = eff, # alpha_hat 固定・rho のみ反映
+      alpha_draws = alpha_draws,
+      rho_draws = rho_draws,
+      alpha_hat = alpha_hat,
+      rho_hat = rho_hat,
+      effects = eff,
       inputs = inputs,
-      sar = sar, # Step2 の詳細（rho/sigma2/Lambda/F など）
+      sar = sar,
       T0 = T0
     ),
     class = "scspill"
   )
 }
 
-row_normalize <- function(W, tol = 1e-12, zero_policy = c("keep", "uniform0")) {
-  zero_policy <- match.arg(zero_policy)
-  stopifnot(is.matrix(W), is.numeric(W))
-  W <- as.matrix(W)
-  # 対角を0に（自己重みは使わない前提）
-  diag(W) <- 0
-  # 負の値があれば警告
-  if (any(W < -tol, na.rm = TRUE)) {
-    warning("W has negative entries.")
-  }
-  # NAは0として扱う
-  W[is.na(W)] <- 0
-  rs <- rowSums(W)
-  # 0除算回避
-  nz <- rs > tol
-  W[nz, ] <- W[nz, , drop = FALSE] / rs[nz]
-  # ゼロ行の扱い
-  if (any(!nz)) {
-    if (zero_policy == "uniform0") {
-      # ゼロ行を一様(=0)のまま（既に0なので何もしない）
-      # 何もしない
-      NULL
-    } else {
-      # keep: 何もしない（同じ）
-      NULL
-    }
-  }
-  W
-}
 
+normalize_joint_wW <- function(W, w) {
+  stopifnot(is.matrix(W))
+  stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))
+
+  N <- nrow(W)
+  joint <- cbind(w, W)
+
+  rs <- rowSums(joint)
+  rs[rs == 0] <- 1
+
+  joint_norm <- joint / rs
+
+  w_new <- joint_norm[, 1, drop = TRUE]
+  W_new <- joint_norm[, -1, drop = FALSE]
+
+  list(W_new = W_new, w_new = w_new)
+}

@@ -453,25 +453,6 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     nu_sigma2 = rinvgamma(1.0, 1.0/clip1(s2) + 1.0/100.0);
 
     // (5) rho | rest (Adaptive RWMH)
-    // {
-    //   double current_step = std::exp(log_step_rho);
-    //   double prop_rho = R::rnorm(rho, current_step);
-
-    //   // ★ 修正: 高速化された loglik_core_pair (O(T0*N)) を使用
-    //   double lcur = loglik_core_pair(rho).first;
-    //   double lprp = loglik_core_pair(prop_rho).first;
-
-    //   bool accepted = false;
-    //   double loga = lprp - lcur;
-    //   if (std::log(R::runif(0.0,1.0)) < loga) {
-    //     rho = prop_rho;
-    //     accepted = true;
-    //     if (it >= burn) acc_rho++;
-    //   }
-    //   double adapt_step = std::pow(it + 1.0, -adapt_gamma);
-    //   log_step_rho += adapt_step * ((accepted ? 1.0 : 0.0) - target_accept_rho);
-    //   log_step_rho = std::max(-10.0, std::min(log_step_rho, 3.0));
-    // }
         {
     const double lcur = loglik_core_pair(rho).first;
 

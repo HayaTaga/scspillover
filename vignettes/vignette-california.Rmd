@@ -18,35 +18,136 @@ knitr::opts_chunk$set(
 ```
 
 ```{r}
-# library(scspill)
-# data(california_smoking)
-# str(california_smoking)
-
-# W <- california_smoking$W # 行正規化隣接行列 (N x N)
-# w <- california_smoking$w # treated(=CA)への結合度ベクトル (長さN)
-# panel <- california_smoking$panel # 列: unit, time, y
+library(scspill)
+data(california_smoking)
+str(california_smoking)
 ```
 
 ```{r}
-# fit <- sc_spillover(
-#   panel,
-#   treated_unit = "CA",
-#   T0 = 18,
-#   w = w,
-#   W = W,
-#   M = 2000,
-#   burn = 1000,
-#   seed = 1,
-#   verbose = FALSE
-# )
-# summary(fit)
+panel_df <- california_smoking$panel
+w_vec <- california_smoking$w
+W_mat <- california_smoking$W
+panel_df <- panel_df %>%
+  mutate(
+    treatment = ifelse((state == "California") & (year >= 1988), 1, 0)
+  )
+
+# 隣接情報は数値だけ渡すようにする
+w <- as.matrix(w_vec[, 2])
+W <- as.matrix(W_mat[, -1])
+
+fit <- sc_spillover(
+  data = panel_df,
+  treated_unit = "California",
+  w = w,
+  W = W,
+  treatment_dummy = "treatment",
+  y = "cigsale",
+  X = c("retprice"),
+  p_factors = 1,
+  M = 10000,
+  burn = 5000,
+  seed = 20251022,
+  step_rho = 0.5,
+  unit_col = "state",
+  time_col = "year"
+)
 ```
 
 ```{r fig1b}
-# plot(fit, type = "treated")
+# 推定済みオブジェクト: fit
+plot(fit, time_col = "year") # treated effect + 95%CI
+plot(fit, type = "effect", time_col = "year")
+plot(fit, type = "spill_top", top_n = 8, time_col = "year")
+plot(fit, type = "weights") # 合成ウェイトの棒グラフ
+plot(fit, type = "rho") # rho の事後分布
+plot(fit, type = "beta") # beta の事後要約（あれば）
+plot(fit, type = "trace") # rho のトレース
 ```
 
 ```{r fig2}
-# idx_LA <- which(fit$inputs$units$controls == "LA")
-# plot(fit, type = "spillover", unit_index = idx_LA)
+# Robustness Check
+
+# Prior Sensitivity
+grid <- data.frame(
+  a0 = c(3,5,2),
+  b0 = c(1,1,0.5),
+  rho_lo = c(-0.5,-0.3,-0.7),
+  rho_hi = c( 0.5, 0.3, 0.7),
+  step_rho = c(0.05, 0.03, 0.07)
+)
+
+Yc_pre_obs <- panel_df %>%
+  filter(
+    (state != "California") & (year < 1988)
+  ) %>%
+  pivot_wider(
+    id_cols = year,
+    names_from = state,
+    values_from = cigsale
+  ) %>%
+  select(-year) %>%
+  as.matrix()
+
+Y0_pre <- panel_df %>%
+  filter(
+    (state == "California") & (year < 1988)
+  ) %>%
+  select(cigsale) %>%
+  as.matrix()
+
+Xc_pre <- panel_df %>%
+  filter(
+    (state != "California") & (year < 1988)
+  ) %>%
+  pivot_wider(
+    id_cols = year,
+    names_from = state,
+    values_from = retprice
+  ) %>%
+  select(-year) %>%
+  as.matrix()
+
+dim(Xc_pre) <- c(nrow(Xc_pre), ncol(Xc_pre), 1)
+
+alpha_hat <- colMeans(fit$alpha_draws)
+sds_Yc <- apply(Yc_pre_obs, 2, sd)
+sds_Yc[!is.finite(sds_Yc) | sds_Yc < 1e-8] <- 1
+alpha_hat_scaled <- alpha_hat / sds_Yc
+
+sens <- prior_sensitivity(
+  Yc_obs = Yc_pre_obs,       # 観測（T0 x N）
+  W_raw = W, w_raw = w,
+  alpha_hat_scaled = alpha_hat_scaled,
+  Xc_pre = Xc_pre, p = 0L,
+  grid = grid,
+  M_burn = 50000L, M_keep = 100000L
+)
+
+sens$theta_table   # 設定別の事後要約
+```
+
+
+```{r}
+# Prior Predictive
+ppc <- prior_predictive(
+  Y0_pre = Y0_pre,
+  Yc_obs = Yc_pre_obs,
+  W_raw = W, w_raw = w,
+  alpha_hat_scaled = alpha_hat_scaled,
+  Xc_pre = Xc_pre, p = 0L,
+  a0 = 5, b0 = 1, rho_support = c(-0.3, 0.3),
+  R = 20000
+)
+
+op <- par(mfrow=c(2,3))
+for (nm in colnames(ppc$stat)) {
+  hist(ppc$stat[[nm]], breaks=30, main=paste("Prior predictive:", nm),
+       xlab=nm, col="grey90", border="white")
+  if (!is.null(ppc$observed) && !is.na(ppc$observed[nm])) {
+    abline(v = ppc$observed[nm], col=2, lwd=2)
+  }
+}
+par(op)
+
 ```

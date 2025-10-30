@@ -1,36 +1,223 @@
 ---
-title: "Simulation (Section 5.1)"
-author: "scspill"
-output: rmarkdown::html_vignette
-vignette: >
-  %\VignetteIndexEntry{Simulation}
-  %\VignetteEngine{knitr::rmarkdown}
-  %\VignetteEncoding{UTF-8}
+title: "Monte Carlo Simulation Study for Spatial Spillover Synthetic Control"
+author: "Replication Package"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(fig.width=7, fig.height=4, message=FALSE, warning=FALSE)
+# Overview
+
+This vignette reproduces the finite‐sample evaluation of the spatial spillover synthetic control estimator.  
+We conduct a Monte Carlo study under controlled data‐generating processes (DGPs) with spatial dependence and interference.
+
+The following functions are assumed to be already installed and available (part of the replication package):
+
+- `run_many_sim()`: Run repeated simulations under one scenario  
+- `summarize_many()`: Summarize bias, RMSE, and 95% coverage  
+- `make_rook_W()`: Generate rook‐adjacency matrix on an m×n grid  
+- `run_scenario_many()`: Convenience wrapper for one scenario  
+- `mc_grid_study()`: Grid simulation across (N, T0, ρ) values  
+
+```{r setup, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Assume the simulation engine functions are already part of the package
+set.seed(20251030)
+```
+
+# Data Generating Process
+
+We simulate an untreated pre‐period of length $begin:math:text$ T_0 $end:math:text$ and a post‐period of length $begin:math:text$ T_1 $end:math:text$.  
+Units lie on a spatial lattice, and outcomes follow a spatial autoregressive structure with spillover from treated units.
+
+Key features of the DGP:
+
+- Spatial correlation governed by $begin:math:text$ \\rho $end:math:text$
+- Spillover weights $begin:math:text$ w $end:math:text$ and adjacency matrix $begin:math:text$ W $end:math:text$
+- One or more covariates (dimension $begin:math:text$K$end:math:text$)
+- A fixed set of treated units
+- MCMC estimation with diffuse priors
+
+# Running the Monte Carlo Study
+
+The command below runs multiple scenarios over a grid of $begin:math:text$ (N, T_0, \\rho) $end:math:text$.  
+Each scenario involves repeated sampling and estimation.
+
+```{r run-grid}
+study <- mc_grid_study(
+  Ns         = c(16, 36, 64),   # grid size: 4×4 and 6×6
+  T0s        = c(30, 60),       # pre-period length
+  rhos       = c(0.3),      # spatial coefficient
+  T1         = c(20, 50),          # post-treatment length
+  sims_per   = 10,        # repetitions per scenario
+  K          = 1,           # number of covariates
+  beta       = c(1.0),      # true regression slope
+  sigma2     = 1.0,         # innovation variance
+  treated_idx= 1:4,         # treated units
+  M          = 5000,        # MCMC iterations
+  burn       = 1000,        # burn-in
+  step_rho   = 0.15         # MH step size
+)
+
+head(study$summary, 10)
+```
+
+The output table contains, for each scenario and estimation method:
+
+- `bias_point`: Bias of the point estimate
+- `rmse_point`: Root mean squared error
+- `cover95_point`: Coverage of the nominal 95% interval
+
+# Bias and RMSE Plots
+
+```{r plot-bias-rmse, fig.width=7, fig.height=5}
+# ---------- Helpers: build table blocks (Bias / RMSE) ----------
+build_block_wide <- function(df_panel, metric = c("bias", "rmse"),
+                             methods_order = c("Proposed","SCM","BSCM"),
+                             digits = 3) {
+  metric <- match.arg(metric)
+  value_col <- if (metric == "bias") "bias_point" else "rmse_point"
+
+  agg <- df_panel %>%
+    group_by(rho, N, method) %>%
+    summarise(value = mean(.data[[value_col]], na.rm = TRUE), .groups = "drop")
+
+  Ns <- sort(unique(agg$N))
+  agg$method <- factor(agg$method, levels = methods_order)
+
+  wide <- agg %>%
+    mutate(col = paste0("N", N, "::", as.character(method))) %>%
+    select(rho, col, value) %>%
+    tidyr::pivot_wider(names_from = col, values_from = value) %>%
+    arrange(rho)
+
+  num_cols <- setdiff(colnames(wide), "rho")
+  wide[num_cols] <- lapply(wide[num_cols], function(x) sprintf(paste0("%.", digits, "f"), x))
+
+  col_order <- unlist(lapply(Ns, function(n) paste0("N", n, "::", methods_order)))
+  wide <- wide[, c("rho", col_order), drop = FALSE]
+  attr(wide, "Ns") <- Ns
+  attr(wide, "methods_order") <- methods_order
+  wide
+}
+
+# ---------- Combine Bias + RMSE with a dashed separator ----------
+combine_bias_rmse <- function(bias_wide, rmse_wide) {
+  stopifnot(identical(colnames(bias_wide), colnames(rmse_wide)))
+  common_cols <- colnames(bias_wide)
+
+  out <- dplyr::bind_rows(
+    bias_wide,
+    setNames(as.list(rep("—", length(common_cols))), common_cols),
+    rmse_wide
+  )
+  out
+}
+
+# ---------- Two-row headers for kable ----------
+make_kable_header <- function(wide_df) {
+  Ns <- attr(wide_df, "Ns")
+  methods <- attr(wide_df, "methods_order")
+
+  top <- c(" " = 1)  # for 'Block'/'rho' columns later
+  for (n in Ns) top[paste0("$N=", n, "$")] <- length(methods)
+
+  second <- c(" $\\rho$ " = 1)
+  for (n in Ns) second <- c(second, setNames(rep(methods, 1), methods))
+  list(top = top, second = second)
+}
+```
+
+# Render Panel
+
+```{r plot-coverage, fig.width=7, fig.height=4}
+render_panel_table <- function(summary_df, T0_target,
+                               methods_order = c("Proposed","SCM","BSCM"),
+                               digits = 3, caption = NULL) {
+
+  df_panel <- summary_df %>% filter(T0 == T0_target)
+  stopifnot(nrow(df_panel) > 0)
+
+  bias_w  <- build_block_wide(df_panel, metric = "bias", methods_order = methods_order, digits = digits)
+  rmse_w  <- build_block_wide(df_panel, metric = "rmse", methods_order = methods_order, digits = digits)
+  merged  <- combine_bias_rmse(bias_w, rmse_w)
+
+  hdr <- make_kable_header(bias_w)
+
+  # locate dashed-separator row (filled with em-dashes)
+  dash_row <- which(merged[[1]] == "—")
+  if (length(dash_row) == 1L) merged[dash_row, ] <- lapply(merged[dash_row, ], function(x) "")
+
+  # prepend block labels: 'Bias' and 'RMSE' stubs
+  rhos <- sort(unique(df_panel$rho))
+  n_rho <- length(rhos)
+  block_label <- c(rep("Bias", n_rho), "", rep("RMSE", n_rho))
+  merged <- cbind(Block = block_label, merged)
+
+  kb <- kable(
+    merged,
+    format = "latex",
+    booktabs = TRUE,
+    escape = FALSE,
+    caption = caption,
+    align = c("l", "r", rep("r", ncol(merged)-2))
+  ) %>%
+    kableExtra::kable_styling(latex_options = c("hold_position")) %>%
+    add_header_above(hdr$second, escape = FALSE) %>%
+    add_header_above(hdr$top, escape = FALSE)
+
+  if (length(dash_row) == 1L) {
+    kb <- kb %>% kableExtra::row_spec(dash_row + 1, extra_latex_after = "\\hdashline")
+  }
+  kb
+}
+```
+
+# Inspecting Raw Output for One Scenario
+
+```{r inspect-scenario}
+unique_T0 <- sort(unique(study$summary$T0))
+panel_caption <- paste0("Simulation Results for Bias and RMSE \\quad (Panel (a): $T_0 = ", unique_T0[1], "$)")
+
+panel_a <- render_panel_table(
+  summary_df = study$summary,
+  T0_target  = unique_T0[1],
+  methods_order = c("Proposed","SCM","BSCM"),
+  digits = 3,
+  caption = panel_caption
+)
+
+panel_a
 ```
 
 ```{r}
-# library(scspill)
-
-# # パッケージ内のテスト補助スクリプトを再利用
-# # （インストール後は system.file で取得可能）
-# helper <- system.file("tests/testthat/helper-sim.R", package = "scspill")
-# source(helper)
-
-# set.seed(1)
-# sim <- gen_sim(N = 36, T = 30, T0 = 20, rho = 0.3)
-
-# fit <- sc_spillover(sim$panel, treated_unit = "T0", T0 = sim$T0,
-#                     w = sim$w, W = sim$W,
-#                     M = 1000, burn = 500, seed = 1, verbose = FALSE)
-# summary(fit)
+if (length(unique_T0) >= 2) {
+  for (j in 2:length(unique_T0)) {
+    cat(sprintf("**Panel (%s):** $T_0 = %d$\n\n", letters[ j ], unique_T0[j]))
+    print(
+      render_panel_table(
+        summary_df = study$summary,
+        T0_target  = unique_T0[j],
+        methods_order = c("Proposed","SCM","BSCM"),
+        digits = 3,
+        caption = paste0("Simulation Results for Bias and RMSE \\quad (Panel (", letters[j], "): $T_0 = ", unique_T0[j], "$)")
+      )
+    )
+    cat("\n\n")
+  }
+}
 ```
-
 
 ```{r}
-# plot(fit, type = "treated")
+# Save the LaTeX code for the main panel to a .tex file for inclusion in the manuscript.
+save_kable(panel_a, file = "./data/table_sim_panel_a.tex")
 ```
 
+```{r}
+sessionInfo()
+```

@@ -27,7 +27,10 @@ W_mat <- sudan_secession_latest$W
 panel_df <- panel_df %>%
   mutate(
     treatment = ifelse((country == "Sudan") & (year >= 2011), 1, 0)
-  )
+  ) %>%
+    filter(
+      year <= 2015
+    )
 
 ```
 
@@ -44,10 +47,10 @@ fit <- sc_spillover(
   y = colnames(panel_df)[11],
   X = colnames(panel_df)[4:10],
   p_factors = 1,
-  M = 5000,
-  burn = 2500,
+  M = 50000,
+  burn = 25000,
   seed = 20251022,
-  step_rho = 0.1,
+  step_rho = 0.05,
   unit_col = "country",
   time_col = "year"
 )

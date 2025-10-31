@@ -19,6 +19,8 @@ knitr::opts_chunk$set(
 
 ```{r}
 library(scspill)
+library(dplyr)
+library(tidyverse)
 data(california_smoking)
 str(california_smoking)
 ```
@@ -35,7 +37,6 @@ panel_df <- panel_df %>%
 # 隣接情報は数値だけ渡すようにする
 w <- as.matrix(w_vec[, 2])
 W <- as.matrix(W_mat[, -1])
-
 fit <- sc_spillover(
   data = panel_df,
   treated_unit = "California",
@@ -70,10 +71,10 @@ plot(fit, type = "trace") # rho のトレース
 
 # Prior Sensitivity
 grid <- data.frame(
-  a0 = c(3,5,2),
-  b0 = c(1,1,0.5),
-  rho_lo = c(-0.5,-0.3,-0.7),
-  rho_hi = c( 0.5, 0.3, 0.7),
+  a0 = c(3, 5, 2),
+  b0 = c(1, 1, 0.5),
+  rho_lo = c(-0.5, -0.3, -0.7),
+  rho_hi = c(0.5, 0.3, 0.7),
   step_rho = c(0.05, 0.03, 0.07)
 )
 
@@ -116,15 +117,18 @@ sds_Yc[!is.finite(sds_Yc) | sds_Yc < 1e-8] <- 1
 alpha_hat_scaled <- alpha_hat / sds_Yc
 
 sens <- prior_sensitivity(
-  Yc_obs = Yc_pre_obs,       # 観測（T0 x N）
-  W_raw = W, w_raw = w,
+  Yc_obs = Yc_pre_obs, # 観測（T0 x N）
+  W_raw = W,
+  w_raw = w,
   alpha_hat_scaled = alpha_hat_scaled,
-  Xc_pre = Xc_pre, p = 0L,
+  Xc_pre = Xc_pre,
+  p = 0L,
   grid = grid,
-  M_burn = 50000L, M_keep = 100000L
+  M_burn = 50000L,
+  M_keep = 100000L
 )
 
-sens$theta_table   # 設定別の事後要約
+sens$theta_table # 設定別の事後要約
 ```
 
 
@@ -133,21 +137,151 @@ sens$theta_table   # 設定別の事後要約
 ppc <- prior_predictive(
   Y0_pre = Y0_pre,
   Yc_obs = Yc_pre_obs,
-  W_raw = W, w_raw = w,
+  W_raw = W,
+  w_raw = w,
   alpha_hat_scaled = alpha_hat_scaled,
-  Xc_pre = Xc_pre, p = 0L,
-  a0 = 5, b0 = 1, rho_support = c(-0.3, 0.3),
+  Xc_pre = Xc_pre,
+  p = 0L,
+  a0 = 5,
+  b0 = 1,
+  rho_support = c(-0.3, 0.3),
   R = 20000
 )
 
-op <- par(mfrow=c(2,3))
+op <- par(mfrow = c(2, 3))
 for (nm in colnames(ppc$stat)) {
-  hist(ppc$stat[[nm]], breaks=30, main=paste("Prior predictive:", nm),
-       xlab=nm, col="grey90", border="white")
+  hist(
+    ppc$stat[[nm]],
+    breaks = 30,
+    main = paste("Prior predictive:", nm),
+    xlab = nm,
+    col = "grey90",
+    border = "white"
+  )
   if (!is.null(ppc$observed) && !is.na(ppc$observed[nm])) {
-    abline(v = ppc$observed[nm], col=2, lwd=2)
+    abline(v = ppc$observed[nm], col = 2, lwd = 2)
   }
 }
 par(op)
 
+```
+
+
+
+```{r}
+# ---- packages ----
+library(coda)
+library(mcmcse)
+library(posterior)
+
+# ---- helpers ----
+.check_draws_matrix <- function(x) {
+  # Ensure a numeric matrix with column names
+  stopifnot(is.matrix(x), is.numeric(x))
+  if (is.null(colnames(x))) {
+    colnames(x) <- paste0("param[", seq_len(ncol(x)), "]")
+  }
+  x
+}
+
+# ============================================
+# Single-chain diagnostics
+# Input: matrix (iterations x parameters)
+# Output: data.frame of summaries; attributes contain classical tests
+# ============================================
+mcmc_diagnostics_single <- function(draws_matrix, label = "chain1") {
+  # draws_matrix: numeric matrix (iterations x parameters)
+  Z <- .check_draws_matrix(draws_matrix)
+  mmc <- coda::mcmc(Z)
+
+  # means, sd
+  mu <- colMeans(Z)
+  sds <- apply(Z, 2, sd)
+
+  # ESS (coda) and lag-1 ACF
+  ess_coda <- coda::effectiveSize(mmc)
+  acf_lag1 <- apply(Z, 2, function(z) {
+    acf(z, plot = FALSE, lag.max = 1)$acf[2L]
+  })
+
+  # MCSE (mcmcse, batch means)
+  mcse_mean <- sapply(seq_len(ncol(Z)), function(j) mcmcse::mcse(Z[, j])$se)
+  ess_bm <- sapply(seq_len(ncol(Z)), function(j) mcmcse::ess(Z[, j]))
+
+  # posterior::ess_bulk / ess_tail; Rhat is NA for single chain
+  ds <- posterior::as_draws_matrix(Z)
+  ess_bulk <- posterior::ess_bulk(ds)
+  ess_tail <- posterior::ess_tail(ds)
+  rhat <- posterior::rhat(ds) # single chain -> NA
+
+  # Classical diagnostics (stored in attributes)
+  gz <- try(suppressWarnings(coda::geweke.diag(mmc)$z), silent = TRUE)
+  hd <- try(suppressWarnings(coda::heidel.diag(mmc)), silent = TRUE)
+  rft <- try(suppressWarnings(coda::raftery.diag(mmc)), silent = TRUE)
+
+  out <- data.frame(
+    param = colnames(Z),
+    mean = as.numeric(mu),
+    sd = as.numeric(sds),
+    ess_coda = as.numeric(ess_coda),
+    ess_bulk = as.numeric(ess_bulk),
+    ess_tail = as.numeric(ess_tail),
+    ess_bm = as.numeric(ess_bm),
+    mcse_mean = as.numeric(mcse_mean),
+    acf_lag1 = as.numeric(acf_lag1),
+    rhat = as.numeric(rhat)
+  )
+  attr(out, "gewekeZ") <- gz
+  attr(out, "heidel") <- hd
+  attr(out, "raftery") <- rft
+  attr(out, "label") <- label
+  out
+}
+
+
+# ============================================
+# Optional: quick plots if bayesplot is available
+# Input: draws (matrix) or list of matrices
+# ============================================
+mcmc_quick_plots <- function(draws, params = NULL, max_params = 8) {
+  if (!requireNamespace("bayesplot", quietly = TRUE)) {
+    message("bayesplot not installed; skipping plots.")
+    return(invisible(NULL))
+  }
+  pick_cols <- function(m) {
+    idx <- seq_len(ncol(m))
+    if (!is.null(params)) {
+      idx <- which(colnames(m) %in% params)
+    }
+    idx <- head(idx, max_params)
+    m[, idx, drop = FALSE]
+  }
+
+  if (is.matrix(draws)) {
+    Z <- pick_cols(.check_draws_matrix(draws))
+    bayesplot::mcmc_trace(Z)
+    bayesplot::mcmc_acf(Z)
+  } else if (is.list(draws)) {
+    L <- lapply(draws, function(m) pick_cols(.check_draws_matrix(m)))
+    # to array: iterations x parameters x chains
+    iters <- min(sapply(L, nrow))
+    P <- ncol(L[[1L]])
+    arr <- array(NA_real_, dim = c(iters, P, length(L)))
+    for (c in seq_along(L)) {
+      arr[,, c] <- L[[c]][seq_len(iters), , drop = FALSE]
+    }
+    colnames(arr) <- colnames(L[[1L]])
+    dm <- posterior::as_draws_array(arr)
+    bayesplot::mcmc_trace(dm)
+    bayesplot::mcmc_acf(dm)
+    bayesplot::mcmc_rhat(dm)
+  } else {
+    stop("draws must be a matrix or a list of matrices.")
+  }
+  invisible(NULL)
+}
+
+D <- cbind(fit$alpha_draws, fit$rho_draws)
+diag1 <- mcmc_diagnostics_single(D, label = "posterior_run")
+diag1
 ```

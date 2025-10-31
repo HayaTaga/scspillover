@@ -101,8 +101,8 @@ posterior_effects <- function(
     a <- as.matrix(alpha_draws[m, ])
     r <- rho_draws[m]
     # Ainv <- solve(IN - r * (w %*% t(a) + W)) # (IN - r w a' - r W)^{-1}
-    A <- inverse_check(IN, r, w, a, W)      # 固有値半径をもとに r を安全化し、A を組み立て
-    Ainv <- robust_solve(A) 
+    A <- inverse_check(IN, r, w, a, W) # 固有値半径をもとに r を安全化し、A を組み立て
+    Ainv <- robust_solve(A)
     B <- (IN - r * W)
     for (t in 1:T1) {
       yc <- Yc_post[t, ]
@@ -124,13 +124,14 @@ posterior_effects <- function(
   )
 }
 
+#' @keywords internal
 inverse_check <- function(IN, r, w, a, W, eps_spec = 1e-3) {
   N <- nrow(IN)
   stopifnot(ncol(IN) == N, length(w) == N, length(a) == ncol(W), nrow(W) == N)
 
   B <- w %*% t(a) + W
 
-  ev  <- eigen(B, only.values = TRUE)$values
+  ev <- eigen(B, only.values = TRUE)$values
   rho <- max(Mod(ev))
   if (is.finite(rho) && rho > 0) {
     r_max <- (1 - eps_spec) / rho
@@ -141,16 +142,27 @@ inverse_check <- function(IN, r, w, a, W, eps_spec = 1e-3) {
   A
 }
 
-robust_solve <- function(A, b = NULL, ridge0 = 1e-12, max_tries = 6, qr_tol = 1e-12) {
-  N <- nrow(A); I <- diag(N)
+#' @keywords internal
+robust_solve <- function(
+  A,
+  b = NULL,
+  ridge0 = 1e-12,
+  max_tries = 6,
+  qr_tol = 1e-12
+) {
+  N <- nrow(A)
+  I <- diag(N)
   lam <- 0
   for (k in 0:max_tries) {
     Areg <- if (lam == 0) A else A + lam * I
     # rcond/kappa の評価（失敗時は次へ）
-    ok <- tryCatch({
-      rc <- 1 / kappa(Areg, exact = FALSE)
-      is.finite(rc) && rc > 1e-12
-    }, error = function(e) FALSE)
+    ok <- tryCatch(
+      {
+        rc <- 1 / kappa(Areg, exact = FALSE)
+        is.finite(rc) && rc > 1e-12
+      },
+      error = function(e) FALSE
+    )
 
     if (ok) {
       # 右辺があれば Ax=b を解き、無ければ擬似逆行列的に I を右辺に
@@ -164,7 +176,11 @@ robust_solve <- function(A, b = NULL, ridge0 = 1e-12, max_tries = 6, qr_tol = 1e
     lam <- if (lam == 0) ridge0 else lam * 10
   }
   # 最後の手段（MASS::ginv）。理論的に特異で許容できる場合にのみ。
-  if (!requireNamespace("MASS", quietly = TRUE)) stop("MASS not installed for ginv fallback.")
-  if (is.null(b)) return(MASS::ginv(A))
+  if (!requireNamespace("MASS", quietly = TRUE)) {
+    stop("MASS not installed for ginv fallback.")
+  }
+  if (is.null(b)) {
+    return(MASS::ginv(A))
+  }
   MASS::ginv(A) %*% b
 }

@@ -9,10 +9,21 @@ returns posterior draws of weights and rho, and identified treatment/spillover e
 
 ```r
 install.packages(c("devtools","roxygen2","testthat","rmarkdown","progress","ggplot2","Matrix"))
+devtools::clean_dll()
 devtools::document()
 devtools::build()
 devtools::load_all(".")
 devtools::check()
+
+tmp_lib <- file.path(tempdir(), "lib_scspill")
+remotes::install_local(
+  path = ".",
+  lib = tmp_lib,
+  build_vignettes = FALSE,
+  upgrade = "never",
+  INSTALL_opts = c("--no-multiarch"),
+  force = TRUE
+)
 ```
 
 ```r

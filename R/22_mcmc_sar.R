@@ -74,20 +74,7 @@ sar_gibbs_sampler <- function(
   )
 }
 
-
-# 22_mcmc_sar.R
-# Step 2: α̂ を固定して、SCSPILL（ρ, σ², β, 潜在因子）を推定
-
-if (!exists("sar_full_sampler_cpp_step2")) {
-  if (file.exists("20_mcmc.cpp")) {
-    Rcpp::sourceCpp("20_mcmc.cpp")
-  } else if (file.exists("R/20_mcmc.cpp")) {
-    Rcpp::sourceCpp("R/20_mcmc.cpp")
-  } else {
-    stop("20_mcmc.cpp が見つかりません。パスをご確認ください。")
-  }
-}
-
+#' @keywords internal
 .rhat_basic <- function(ch_list_num) {
   # ch_list_num: list of numeric vectors（各チェーンの draws）
   m <- length(ch_list_num)
@@ -110,6 +97,7 @@ if (!exists("sar_full_sampler_cpp_step2")) {
   sqrt(var_plus / W)
 }
 
+#' @keywords internal
 run_sar_step2 <- function(
   Yc_pre,
   alpha_hat,

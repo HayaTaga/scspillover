@@ -7,6 +7,7 @@
   stats::quantile(x, c(0.025, 0.975), names = FALSE)
 }
 
+#' @keywords internal
 # rook 型の隣接行列（行標準化）
 rook_W <- function(nrow, ncol, normalize = FALSE) {
   N <- nrow * ncol
@@ -34,12 +35,15 @@ rook_W <- function(nrow, ncol, normalize = FALSE) {
   }
   nb
 }
+
+#' @keywords internal
 make_w <- function(N, treated = 1L) {
   w <- numeric(N)
   w[treated] <- 1
   w
 }
 
+#' @keywords internal
 normalize_joint_wW <- function(W, w) {
   stopifnot(is.matrix(W))
   stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))
@@ -123,6 +127,7 @@ if (!requireNamespace("quadprog", quietly = TRUE)) {
 #   3) Y0^1_t = Y0^0_t + τ_t,  τ_t ~ N(μ_τ, σ_τ^2)
 #   4) Yc^1_t = (I - ρW)^{-1}(w Y0^1_t + X_tβ + ε_t)
 # =========================================================
+#' @keywords internal
 scspill_sim_dgp <- function(
   T0,
   T1,
@@ -262,6 +267,7 @@ scspill_sim_dgp <- function(
 #       * treated で w
 #       * seed は run_one_sim の引数から dgp に伝搬
 # =========================================================
+#' @keywords internal
 run_one_sim <- function(
   dgp = NULL,
   dgp_args = NULL,
@@ -535,6 +541,7 @@ run_one_sim <- function(
 # =========================================================
 # Monte Carlo
 # =========================================================
+#' @keywords internal
 run_many_sim <- function(
   n_sims,
   dgp_args, # scspill_sim_dgp に渡す引数
@@ -558,6 +565,7 @@ run_many_sim <- function(
   res
 }
 
+#' @keywords internal
 summarize_many <- function(results) {
   stopifnot(is.list(results), length(results) > 0)
   tab <- do.call(rbind, lapply(results, function(r) r$metrics))

@@ -155,6 +155,7 @@
 #   effect = y0 - a' tmp  =>  counterfactual = a' tmp
 #
 # 返り値: data.frame(time, t_idx, period, y_obs, y_cf_mean, y_cf_lo, y_cf_hi)
+#' @keywords internal
 scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
   stopifnot(inherits(fit, "scspill"))
 
@@ -246,6 +247,7 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
 
 # ---------------- tidy 化（効果・スピル・重み等を取り出し） ----------------
 # 既存の fit$effects / fit$weights があればそれを尊重。無ければ最小限を再構成。
+#' @keywords internal
 tidy_scspill <- function(fit, time_col = NULL) {
   y0_pre <- as.numeric(fit$inputs$Y0_pre)
   y0_post <- as.numeric(fit$inputs$Y0_post)

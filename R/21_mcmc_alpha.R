@@ -9,20 +9,6 @@ hs_alpha_gibbs <- function(y, X, M = 2000, burn = 1000, verbose = TRUE) {
   list(alpha = draws)
 }
 
-
-# 21_mcmc_alpha.R
-# Step 1: α の MCMC（BSCM）を複数チェーンで回して α_hat を返す
-
-if (!exists("hs_alpha_gibbs_cpp")) {
-  if (file.exists("20_mcmc.cpp")) {
-    Rcpp::sourceCpp("20_mcmc.cpp")
-  } else if (file.exists("R/20_mcmc.cpp")) {
-    Rcpp::sourceCpp("R/20_mcmc.cpp")
-  } else {
-    stop("20_mcmc.cpp が見つかりません。パスをご確認ください。")
-  }
-}
-
 #--- basic split-Rhat（各成分ごと） ---
 .rhat_split_vec <- function(chains_list) {
   # chains_list: list of matrices (draws x dim), 同じ行数が望ましい
@@ -60,6 +46,7 @@ if (!exists("hs_alpha_gibbs_cpp")) {
 }
 
 #--- メイン：複数チェーンで α を推定 ---
+#' @keywords internal
 run_alpha_step1 <- function(
   Y0_pre,
   Yc_pre,
@@ -89,8 +76,6 @@ run_alpha_step1 <- function(
       control_outcome_pre = Yc_pre,
       iteration = iter,
       burn = burn,
-      a0 = a0,
-      b0 = b0,
       verbose = verbose
     ) # (iter-burn) x N
   }

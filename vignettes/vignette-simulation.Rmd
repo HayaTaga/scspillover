@@ -50,18 +50,18 @@ Each scenario involves repeated sampling and estimation.
 
 ```{r run-grid}
 study <- mc_grid_study(
-  Ns         = c(16, 36, 64),   # grid size: 4×4 and 6×6
-  T0s        = c(30, 60),       # pre-period length
-  rhos       = c(0.3),      # spatial coefficient
-  T1         = c(20, 50),          # post-treatment length
-  sims_per   = 10,        # repetitions per scenario
-  K          = 1,           # number of covariates
-  beta       = c(1.0),      # true regression slope
-  sigma2     = 1.0,         # innovation variance
-  treated_idx= 1:4,         # treated units
-  M          = 5000,        # MCMC iterations
-  burn       = 1000,        # burn-in
-  step_rho   = 0.15         # MH step size
+  Ns = c(16, 36, 64), # grid size: 4×4 and 6×6
+  T0s = c(30, 60), # pre-period length
+  rhos = c(0.3), # spatial coefficient
+  T1 = c(20, 50), # post-treatment length
+  sims_per = 10, # repetitions per scenario
+  K = 1, # number of covariates
+  beta = c(1.0), # true regression slope
+  sigma2 = 1.0, # innovation variance
+  treated_idx = 1:4, # treated units
+  M = 5000, # MCMC iterations
+  burn = 1000, # burn-in
+  step_rho = 0.15 # MH step size
 )
 
 head(study$summary, 10)
@@ -77,9 +77,12 @@ The output table contains, for each scenario and estimation method:
 
 ```{r plot-bias-rmse, fig.width=7, fig.height=5}
 # ---------- Helpers: build table blocks (Bias / RMSE) ----------
-build_block_wide <- function(df_panel, metric = c("bias", "rmse"),
-                             methods_order = c("Proposed","SCM","BSCM"),
-                             digits = 3) {
+build_block_wide <- function(
+  df_panel,
+  metric = c("bias", "rmse"),
+  methods_order = c("Proposed", "SCM", "BSCM"),
+  digits = 3
+) {
   metric <- match.arg(metric)
   value_col <- if (metric == "bias") "bias_point" else "rmse_point"
 
@@ -97,9 +100,13 @@ build_block_wide <- function(df_panel, metric = c("bias", "rmse"),
     arrange(rho)
 
   num_cols <- setdiff(colnames(wide), "rho")
-  wide[num_cols] <- lapply(wide[num_cols], function(x) sprintf(paste0("%.", digits, "f"), x))
+  wide[num_cols] <- lapply(wide[num_cols], function(x) {
+    sprintf(paste0("%.", digits, "f"), x)
+  })
 
-  col_order <- unlist(lapply(Ns, function(n) paste0("N", n, "::", methods_order)))
+  col_order <- unlist(lapply(Ns, function(n) {
+    paste0("N", n, "::", methods_order)
+  }))
   wide <- wide[, c("rho", col_order), drop = FALSE]
   attr(wide, "Ns") <- Ns
   attr(wide, "methods_order") <- methods_order
@@ -124,11 +131,15 @@ make_kable_header <- function(wide_df) {
   Ns <- attr(wide_df, "Ns")
   methods <- attr(wide_df, "methods_order")
 
-  top <- c(" " = 1)  # for 'Block'/'rho' columns later
-  for (n in Ns) top[paste0("$N=", n, "$")] <- length(methods)
+  top <- c(" " = 1) # for 'Block'/'rho' columns later
+  for (n in Ns) {
+    top[paste0("$N=", n, "$")] <- length(methods)
+  }
 
   second <- c(" $\\rho$ " = 1)
-  for (n in Ns) second <- c(second, setNames(rep(methods, 1), methods))
+  for (n in Ns) {
+    second <- c(second, setNames(rep(methods, 1), methods))
+  }
   list(top = top, second = second)
 }
 ```
@@ -136,22 +147,37 @@ make_kable_header <- function(wide_df) {
 # Render Panel
 
 ```{r plot-coverage, fig.width=7, fig.height=4}
-render_panel_table <- function(summary_df, T0_target,
-                               methods_order = c("Proposed","SCM","BSCM"),
-                               digits = 3, caption = NULL) {
-
+render_panel_table <- function(
+  summary_df,
+  T0_target,
+  methods_order = c("Proposed", "SCM", "BSCM"),
+  digits = 3,
+  caption = NULL
+) {
   df_panel <- summary_df %>% filter(T0 == T0_target)
   stopifnot(nrow(df_panel) > 0)
 
-  bias_w  <- build_block_wide(df_panel, metric = "bias", methods_order = methods_order, digits = digits)
-  rmse_w  <- build_block_wide(df_panel, metric = "rmse", methods_order = methods_order, digits = digits)
-  merged  <- combine_bias_rmse(bias_w, rmse_w)
+  bias_w <- build_block_wide(
+    df_panel,
+    metric = "bias",
+    methods_order = methods_order,
+    digits = digits
+  )
+  rmse_w <- build_block_wide(
+    df_panel,
+    metric = "rmse",
+    methods_order = methods_order,
+    digits = digits
+  )
+  merged <- combine_bias_rmse(bias_w, rmse_w)
 
   hdr <- make_kable_header(bias_w)
 
   # locate dashed-separator row (filled with em-dashes)
   dash_row <- which(merged[[1]] == "—")
-  if (length(dash_row) == 1L) merged[dash_row, ] <- lapply(merged[dash_row, ], function(x) "")
+  if (length(dash_row) == 1L) {
+    merged[dash_row, ] <- lapply(merged[dash_row, ], function(x) "")
+  }
 
   # prepend block labels: 'Bias' and 'RMSE' stubs
   rhos <- sort(unique(df_panel$rho))
@@ -165,14 +191,15 @@ render_panel_table <- function(summary_df, T0_target,
     booktabs = TRUE,
     escape = FALSE,
     caption = caption,
-    align = c("l", "r", rep("r", ncol(merged)-2))
+    align = c("l", "r", rep("r", ncol(merged) - 2))
   ) %>%
     kableExtra::kable_styling(latex_options = c("hold_position")) %>%
     add_header_above(hdr$second, escape = FALSE) %>%
     add_header_above(hdr$top, escape = FALSE)
 
   if (length(dash_row) == 1L) {
-    kb <- kb %>% kableExtra::row_spec(dash_row + 1, extra_latex_after = "\\hdashline")
+    kb <- kb %>%
+      kableExtra::row_spec(dash_row + 1, extra_latex_after = "\\hdashline")
   }
   kb
 }
@@ -182,12 +209,16 @@ render_panel_table <- function(summary_df, T0_target,
 
 ```{r inspect-scenario}
 unique_T0 <- sort(unique(study$summary$T0))
-panel_caption <- paste0("Simulation Results for Bias and RMSE \\quad (Panel (a): $T_0 = ", unique_T0[1], "$)")
+panel_caption <- paste0(
+  "Simulation Results for Bias and RMSE \\quad (Panel (a): $T_0 = ",
+  unique_T0[1],
+  "$)"
+)
 
 panel_a <- render_panel_table(
   summary_df = study$summary,
-  T0_target  = unique_T0[1],
-  methods_order = c("Proposed","SCM","BSCM"),
+  T0_target = unique_T0[1],
+  methods_order = c("Proposed", "SCM", "BSCM"),
   digits = 3,
   caption = panel_caption
 )
@@ -198,14 +229,20 @@ panel_a
 ```{r}
 if (length(unique_T0) >= 2) {
   for (j in 2:length(unique_T0)) {
-    cat(sprintf("**Panel (%s):** $T_0 = %d$\n\n", letters[ j ], unique_T0[j]))
+    cat(sprintf("**Panel (%s):** $T_0 = %d$\n\n", letters[j], unique_T0[j]))
     print(
       render_panel_table(
         summary_df = study$summary,
-        T0_target  = unique_T0[j],
-        methods_order = c("Proposed","SCM","BSCM"),
+        T0_target = unique_T0[j],
+        methods_order = c("Proposed", "SCM", "BSCM"),
         digits = 3,
-        caption = paste0("Simulation Results for Bias and RMSE \\quad (Panel (", letters[j], "): $T_0 = ", unique_T0[j], "$)")
+        caption = paste0(
+          "Simulation Results for Bias and RMSE \\quad (Panel (",
+          letters[j],
+          "): $T_0 = ",
+          unique_T0[j],
+          "$)"
+        )
       )
     )
     cat("\n\n")

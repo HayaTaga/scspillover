@@ -19,33 +19,53 @@ knitr::opts_chunk$set(
 
 ```{r}
 # library(scspill)
-# data(sudan_secession)
+load("./data/sudan_secession_latest.rda")
 
-# W <- sudan_secession$W # 行正規化（貿易連関）
-# w <- sudan_secession$w
-# df <- sudan_secession$panel # 列: unit, time, y（例: 一人当たりGDP）
+panel_df <- sudan_secession_latest$panel
+w_vec <- sudan_secession_latest$w
+W_mat <- sudan_secession_latest$W
+panel_df <- panel_df %>%
+  mutate(
+    treatment = ifelse((country == "Sudan") & (year >= 2011), 1, 0)
+  )
+
 ```
 
 ```{r}
-# fit <- sc_spillover(
-#   df,
-#   treated_unit = "Sudans",
-#   T0 = 11,
-#   w = w,
-#   W = W,
-#   M = 2000,
-#   burn = 1000,
-#   seed = 1,
-#   verbose = FALSE
-# )
-# summary(fit)
+w <- as.matrix(w_vec[, 2])
+W <- as.matrix(W_mat[, -1])
+
+fit <- sc_spillover(
+  data = panel_df,
+  treated_unit = "Sudan",
+  w = w,
+  W = W,
+  treatment_dummy = "treatment",
+  y = colnames(panel_df)[11],
+  X = colnames(panel_df)[4:10],
+  p_factors = 1,
+  M = 5000,
+  burn = 2500,
+  seed = 20251022,
+  step_rho = 0.1,
+  unit_col = "country",
+  time_col = "year"
+)
+
 ```
 
 ```{r fig3b}
-# plot(fit, type = "treated")
+plot(fit, time_col = "year")
+plot(fit, type = "spill_top", top_n = 8, time_col = "year")
 ```
 
 ```{r fig4}
-# idx_EG <- which(fit$inputs$units$controls == "Egypt")
-# plot(fit, type = "spillover", unit_index = idx_EG)
+p <- diagnostics.scspill(
+  fit,
+  which_alpha = NULL,
+  top_n_alpha = 6,
+  which_beta = NULL,
+  top_n_beta = 6
+)
+print(p)
 ```

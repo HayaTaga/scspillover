@@ -8,6 +8,7 @@
   "units" # units$control を内包
 )
 
+#' @keywords internal
 # バリデーション（不足なら即エラー）
 validate_scspill <- function(x) {
   stopifnot(is.list(x), inherits(x, "scspill"))
@@ -48,6 +49,7 @@ validate_scspill <- function(x) {
   invisible(TRUE)
 }
 
+#' @keywords internal
 # コンストラクタ：必須フィールドを強制的に埋め、型を揃えて返す
 new_scspill <- function(
   alpha_draws,

@@ -1,3 +1,4 @@
+#' @export
 sc_spillover <- function(
   data,
   treated_unit,
@@ -29,20 +30,6 @@ sc_spillover <- function(
       paste0(required_cols, collapse = ", ")
     ))
   }
-
-  # Rcpp 実装のロード
-  if (!exists("hs_alpha_gibbs_cpp") || !exists("sar_full_sampler_cpp_step2")) {
-    if (file.exists("20_mcmc.cpp")) {
-      Rcpp::sourceCpp("20_mcmc.cpp")
-    } else if (file.exists("R/20_mcmc.cpp")) {
-      Rcpp::sourceCpp("R/20_mcmc.cpp")
-    } else {
-      stop(
-        "20_mcmc.cpp が見つかりません。`hs_alpha_gibbs_cpp` と `sar_full_sampler_cpp_step2` を含めてください。"
-      )
-    }
-  }
-
   set.seed(seed)
 
   # 介入開始期から T0 を決める
@@ -231,7 +218,7 @@ sc_spillover <- function(
   )
 }
 
-
+#' @export
 normalize_joint_wW <- function(W, w) {
   stopifnot(is.matrix(W))
   stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))

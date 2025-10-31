@@ -118,20 +118,7 @@ arma::mat hs_alpha_gibbs_cpp(const arma::vec& Y0_pre,
     // ===== alpha_mean = D_inv * X' * Y0,  alpha_cov = sigma2 * D_inv =====
     vec alpha_mean = D_inv * Xty;
 
-    // サンプリング：alpha ~ N(alpha_mean, sigma2 * D_inv)
-    // L = sqrt(sigma2) * chol(D_inv)
-    // mat Rinv;
-    // bool ok2 = robust_chol(Rinv, D_inv);
-    // if (!ok2) Rcpp::stop("chol(D_inv) failed even after stabilization.");
-
-    // vec z = randn<vec>(N);
-    // vec step = solve(trimatu(Rinv), z, solve_opts::fast);
-    // vec alpha_new = alpha_mean + std::sqrt(sig2) * step;
-    // alpha_curr = alpha_new;
-
-    arma::mat Sigma = std::max(sig2, 1e-12) * D_inv;  // 共分散行列 Σ = σ² · A⁻¹
-    // Rcpp::Rcout << alpha_mean << "\n";
-    // Rcpp::Rcout << Sigma << "\n";
+    arma::mat Sigma = std::max(sig2, 1e-12) * D_inv;
     arma::vec alpha_new = arma::mvnrnd(alpha_mean, Sigma, 1);  // 多変量正規 N(μ, Σ) から1サンプル
     alpha_curr = alpha_new;
 

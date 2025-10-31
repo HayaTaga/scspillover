@@ -2,7 +2,7 @@
 % Please edit documentation in R/22_mcmc_sar.R
 \name{sar_gibbs_sampler}
 \alias{sar_gibbs_sampler}
-\title{Full SAR MCMC (rho, beta, sigma2, Lambda, F) with optional covariates and factors}
+\title{Full SAR MCMC (joint over rho & alpha, + optional covariates/factors)}
 \usage{
 sar_gibbs_sampler(
   Y0_pre,
@@ -14,14 +14,13 @@ sar_gibbs_sampler(
   burn = 1000,
   verbose = TRUE,
   p_factors = 0,
-  step_rho = 0.05,
-  c_beta = 10,
-  c_lambda = 10,
+  step_rho = 0.01,
+  step_alpha = 0.01,
   a0 = 1,
   b0 = 1
 )
 }
 \description{
-Full SAR MCMC (rho, beta, sigma2, Lambda, F) with optional covariates and factors
+Full SAR MCMC (joint over rho & alpha, + optional covariates/factors)
 }
 \keyword{internal}

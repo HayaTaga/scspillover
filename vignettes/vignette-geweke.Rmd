@@ -18,72 +18,104 @@ We create a simulated spatial–spillover synthetic control environment with cov
 ```{r}
 # --- dimensions ---
 T0 <- 15
-N  <- 8
-K  <- 2     # X covariates
-p  <- 1     # latent factor
+N <- 8
+K <- 2 # X covariates
+p <- 1 # latent factor
 
 # --- W, w, alpha_hat_scaled ---
 W_raw <- matrix(0, N, N)
 for (i in 1:N) {
-  if (i > 1) W_raw[i, i-1] <- 1
-  if (i < N) W_raw[i, i+1] <- 1
+  if (i > 1) {
+    W_raw[i, i - 1] <- 1
+  }
+  if (i < N) W_raw[i, i + 1] <- 1
 }
-w_raw <- rep(0, N); w_raw[1] <- 1
+w_raw <- rep(0, N)
+w_raw[1] <- 1
 
-normalize_joint_wW <- function(W, w){
-  stopifnot(nrow(W)==length(w), ncol(W)==nrow(W))
+normalize_joint_wW <- function(W, w) {
+  stopifnot(nrow(W) == length(w), ncol(W) == nrow(W))
   joint <- cbind(w, W)
-  rs <- rowSums(joint); rs[rs==0] <- 1
-  joint_norm <- joint/rs
-  list(W_new = joint_norm[,-1,drop=FALSE],
-       w_new = joint_norm[,1,drop=TRUE])
+  rs <- rowSums(joint)
+  rs[rs == 0] <- 1
+  joint_norm <- joint / rs
+  list(
+    W_new = joint_norm[, -1, drop = FALSE],
+    w_new = joint_norm[, 1, drop = TRUE]
+  )
 }
 normed <- normalize_joint_wW(W_raw, w_raw)
-W_use <- normed$W_new; w_use <- normed$w_new
+W_use <- normed$W_new
+w_use <- normed$w_new
 
 # fixed alpha_hat_scaled (in practice, scale BSCM alpha)
 alpha_hat_scaled <- rnorm(N, 0, 0.4)
 
 # --- X: T0 x N x K ---
-Xc_pre <- array(0, dim=c(T0, N, K))
-for (t in 1:T0) for (i in 1:N) for (k in 1:K)
-  Xc_pre[t,i,k] <- rnorm(1)
+Xc_pre <- array(0, dim = c(T0, N, K))
+for (t in 1:T0) {
+  for (i in 1:N) {
+    for (k in 1:K) {
+      Xc_pre[t, i, k] <- rnorm(1)
+    }
+  }
+}
 
 # --- true parameters (for internal consistency) ---
-rho_true    <- 0.25
+rho_true <- 0.25
 sigma2_true <- 0.5^2
-beta_true   <- c(0.7, -0.5)
-Eta_true    <- matrix(rnorm(N*p, 0, 0.5), N, p)
-Gamma_true  <- matrix(0, p, T0)
-phi_true    <- 0.5
-s2g_true    <- 0.2
-for (t in 1:T0){
-  if (t==1) Gamma_true[,t] <- rnorm(p, 0, sqrt(s2g_true/(1-phi_true^2)))
-  if (t>=2) Gamma_true[,t] <- phi_true*Gamma_true[,t-1] + rnorm(p, 0, sqrt(s2g_true))
+beta_true <- c(0.7, -0.5)
+Eta_true <- matrix(rnorm(N * p, 0, 0.5), N, p)
+Gamma_true <- matrix(0, p, T0)
+phi_true <- 0.5
+s2g_true <- 0.2
+for (t in 1:T0) {
+  if (t == 1) {
+    Gamma_true[, t] <- rnorm(p, 0, sqrt(s2g_true / (1 - phi_true^2)))
+  }
+  if (t >= 2) {
+    Gamma_true[, t] <- phi_true *
+      Gamma_true[, t - 1] +
+      rnorm(p, 0, sqrt(s2g_true))
+  }
 }
 
 # --- prior ---
-a0 <- 3.0; b0 <- 1.0      # IG(a0, b0) prior for sigma2
+a0 <- 3.0
+b0 <- 1.0 # IG(a0, b0) prior for sigma2
 step_rho <- 0.05
 
 # --- forward simulator in R (mirror of C++ forward kernel) ---
-sim_forward_R <- function(T0, W_use, w_use, alpha_hat_scaled,
-                          rho, sigma2, Xc_pre, beta, Eta, Gamma){
-  N <- nrow(W_use); K <- dim(Xc_pre)[3]
+sim_forward_R <- function(
+  T0,
+  W_use,
+  w_use,
+  alpha_hat_scaled,
+  rho,
+  sigma2,
+  Xc_pre,
+  beta,
+  Eta,
+  Gamma
+) {
+  N <- nrow(W_use)
+  K <- dim(Xc_pre)[3]
   A <- W_use + w_use %*% t(alpha_hat_scaled)
   I <- diag(N)
   Yc <- matrix(NA_real_, T0, N)
-  for (t in 1:T0){
+  for (t in 1:T0) {
     mu <- rep(0, N)
-    if (K>0) {
-      Xt <- Xc_pre[t,,]     # N x K
+    if (K > 0) {
+      Xt <- Xc_pre[t, , ] # N x K
       mu <- mu + as.vector(Xt %*% beta)
     }
-    if (ncol(Eta)>0) mu <- mu + as.vector(Eta %*% Gamma[,t])
+    if (ncol(Eta) > 0) {
+      mu <- mu + as.vector(Eta %*% Gamma[, t])
+    }
     eps <- rnorm(N, 0, sqrt(sigma2))
     rhs <- mu + eps
     M <- I - rho * A
-    Yc[t,] <- as.vector(solve(M, rhs))
+    Yc[t, ] <- as.vector(solve(M, rhs))
   }
   Yc
 }
@@ -92,8 +124,8 @@ sim_forward_R <- function(T0, W_use, w_use, alpha_hat_scaled,
 Y0_pre <- rnorm(T0)
 
 # JDT parameters
-M1 <- 1000000L     # MC path draws
-M2 <- 1000000L     # SC path draws
+M1 <- 1000000L # MC path draws
+M2 <- 1000000L # SC path draws
 burn_in <- 2000000L
 
 # C++ functions (simulate_Yc_forward_cpp / scspill_one_step_cpp)
@@ -108,21 +140,21 @@ The function `geweke_jdt_full()` executes the marginal–conditional (MC) and su
 
 ```{r}
 out_ok <- geweke_jdt_full(
-  Y0_pre           = Y0_pre,
+  Y0_pre = Y0_pre,
   Yc_pre_like_dims = c(T0, N),
-  W_raw            = W_use,
-  w_raw            = w_use,
+  W_raw = W_use,
+  w_raw = w_use,
   alpha_hat_scaled = alpha_hat_scaled,
-  Xc_pre           = Xc_pre,
-  p                = p,
-  M1               = M1,
-  M2               = M2,
-  burn_in          = burn_in,
-  a0               = a0,
-  b0               = b0,
-  step_rho         = step_rho,
-  g_fn             = default_g_fn,
-  verbose          = TRUE
+  Xc_pre = Xc_pre,
+  p = p,
+  M1 = M1,
+  M2 = M2,
+  burn_in = burn_in,
+  a0 = a0,
+  b0 = b0,
+  step_rho = step_rho,
+  g_fn = default_g_fn,
+  verbose = TRUE
 )
 
 print(out_ok$summary)
@@ -149,13 +181,17 @@ print(out_ok$summary)
 
 ```{r}
 if (!is.null(out_ok$rho_trace)) {
-  plot(out_ok$rho_trace, type="l", main="rho trace (SC path)",
-       xlab="iteration", ylab="rho")
+  plot(
+    out_ok$rho_trace,
+    type = "l",
+    main = "rho trace (SC path)",
+    xlab = "iteration",
+    ylab = "rho"
+  )
 }
 
 if (!is.null(out_ok$accept_rate_rho_proxy)) {
-  cat("Acceptance proxy for rho:",
-      round(out_ok$accept_rate_rho_proxy, 3), "\n")
+  cat("Acceptance proxy for rho:", round(out_ok$accept_rate_rho_proxy, 3), "\n")
 }
 ```
 

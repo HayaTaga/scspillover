@@ -1,37 +1,49 @@
 # 40_geweke_full.R
 
 # --- 前処理ユーティリティ ---
+#' @keywords internal
 normalize_joint_wW <- function(W, w) {
   stopifnot(is.matrix(W))
   stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))
   N <- nrow(W)
   joint <- cbind(w, W)
-  rs <- rowSums(joint); rs[rs == 0] <- 1
+  rs <- rowSums(joint)
+  rs[rs == 0] <- 1
   joint_norm <- joint / rs
   w_new <- joint_norm[, 1, drop = TRUE]
   W_new <- joint_norm[, -1, drop = FALSE]
   list(W_new = W_new, w_new = w_new)
 }
 
+#' @keywords internal
 compute_bnd <- function(W_use, w_use, alpha_hat_scaled, c_stability = 0.95) {
   A <- W_use + w_use %*% t(alpha_hat_scaled)
   ev <- eigen(A, symmetric = FALSE, only.values = TRUE)$values
-  maxabs <- max(Mod(ev)); if (!is.finite(maxabs) || maxabs < 1e-12) maxabs <- 1e-12
+  maxabs <- max(Mod(ev))
+  if (!is.finite(maxabs) || maxabs < 1e-12) {
+    maxabs <- 1e-12
+  }
   c_stability / maxabs
 }
 
 # --- g(θ, y) ---
+#' @keywords internal
 default_g_fn <- function(theta, Yc, Y0_pre, W_use, w_use) {
   yc_vec <- as.numeric(Yc)
-  N <- ncol(Yc); T0 <- nrow(Yc)
+  N <- ncol(Yc)
+  T0 <- nrow(Yc)
   wyc <- as.numeric(Yc %*% as.numeric(w_use))
   spatial_q <- sum(diag(Yc %*% W_use %*% t(Yc))) / (N * T0)
-  corr_y0_wyc <- if (stats::sd(Y0_pre) > 0 && stats::sd(wyc) > 0) cor(Y0_pre, wyc) else NA_real_
+  corr_y0_wyc <- if (stats::sd(Y0_pre) > 0 && stats::sd(wyc) > 0) {
+    cor(Y0_pre, wyc)
+  } else {
+    NA_real_
+  }
 
   # パラメータ側の統計量
   beta_mean <- if (length(theta$beta) > 0) mean(theta$beta) else NA_real_
-  Eta_mean  <- if (length(theta$Eta) > 0)  mean(theta$Eta)  else NA_real_
-  Gamma_mean<- if (length(theta$Gamma) > 0) mean(theta$Gamma) else NA_real_
+  Eta_mean <- if (length(theta$Eta) > 0) mean(theta$Eta) else NA_real_
+  Gamma_mean <- if (length(theta$Gamma) > 0) mean(theta$Gamma) else NA_real_
 
   c(
     # 既存
@@ -52,22 +64,49 @@ default_g_fn <- function(theta, Yc, Y0_pre, W_use, w_use) {
 }
 
 # --- 事前からの初期値（MC/SC 共通の事前と整合） ---
-draw_initial_state <- function(T0, N, K, p, a0, b0, W_use, w_use, alpha_hat_scaled) {
+#' @keywords internal
+draw_initial_state <- function(
+  T0,
+  N,
+  K,
+  p,
+  a0,
+  b0,
+  W_use,
+  w_use,
+  alpha_hat_scaled
+) {
   bnd <- compute_bnd(W_use, w_use, alpha_hat_scaled)
   rho0 <- stats::runif(1, -bnd, bnd)
   sigma2_0 <- 1 / stats::rgamma(1, shape = a0, rate = b0)
   beta0 <- if (K > 0) stats::rnorm(K, 0, 1) else numeric()
-  Eta0  <- if (p > 0) matrix(stats::rnorm(N * p, 0, 1), N, p) else matrix(0, N, 0)
-  Gamma0<- if (p > 0) matrix(stats::rnorm(p * T0, 0, 1), p, T0) else matrix(0, 0, T0)
-  list(rho = as.numeric(rho0), sigma2 = as.numeric(sigma2_0),
-       beta = beta0, Eta = Eta0, Gamma = Gamma0)
+  Eta0 <- if (p > 0) {
+    matrix(stats::rnorm(N * p, 0, 1), N, p)
+  } else {
+    matrix(0, N, 0)
+  }
+  Gamma0 <- if (p > 0) {
+    matrix(stats::rnorm(p * T0, 0, 1), p, T0)
+  } else {
+    matrix(0, 0, T0)
+  }
+  list(
+    rho = as.numeric(rho0),
+    sigma2 = as.numeric(sigma2_0),
+    beta = beta0,
+    Eta = Eta0,
+    Gamma = Gamma0
+  )
 }
 
 # --- バッチ平均分散（MCMC側 SE） ---
+#' @keywords internal
 var_mcmc_batchmeans <- function(x, b = NULL) {
   x <- x[is.finite(x)]
   M <- length(x)
-  if (is.null(b)) b <- max(2L, floor(sqrt(M)))
+  if (is.null(b)) {
+    b <- max(2L, floor(sqrt(M)))
+  }
   a <- floor(M / b)
   if (a < 2L) {
     vx <- stats::var(x)
@@ -80,13 +119,14 @@ var_mcmc_batchmeans <- function(x, b = NULL) {
 }
 
 # --- Geweke JDT 本体（完全版） ---
+#' @keywords internal
 geweke_jdt_full <- function(
   Y0_pre,
-  Yc_pre_like_dims,   # c(T0, N)
+  Yc_pre_like_dims, # c(T0, N)
   W_raw,
   w_raw,
-  alpha_hat_scaled,    # N
-  Xc_pre = NULL,       # T0 x N x K array or NULL
+  alpha_hat_scaled, # N
+  Xc_pre = NULL, # T0 x N x K array or NULL
   p = 0L,
   M1 = 20000L,
   M2 = 20000L,
@@ -100,26 +140,43 @@ geweke_jdt_full <- function(
 ) {
   stopifnot(is.numeric(Y0_pre))
   T0 <- length(Y0_pre)
-  N  <- Yc_pre_like_dims[2]
-  K  <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
+  N <- Yc_pre_like_dims[2]
+  K <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
 
   # 正規化（行ごとに w|W を同時に）
   normed <- normalize_joint_wW(W_raw, w_raw)
-  W_use <- normed$W_new; w_use <- normed$w_new
+  W_use <- normed$W_new
+  w_use <- normed$w_new
 
   # ---------- MC (iid) side ----------
-  if (verbose) message("[JDT] MC side (iid) ...")
+  if (verbose) {
+    message("[JDT] MC side (iid) ...")
+  }
   g_iid_mat <- NULL
   for (m in seq_len(M1)) {
-    st <- draw_initial_state(T0, N, K, p, a0, b0, W_use, w_use, alpha_hat_scaled)
+    st <- draw_initial_state(
+      T0,
+      N,
+      K,
+      p,
+      a0,
+      b0,
+      W_use,
+      w_use,
+      alpha_hat_scaled
+    )
     Xc_used <- if (is.null(Xc_pre)) array(0, c(T0, N, 0L)) else Xc_pre
     Yc_draw <- simulate_Yc_forward_cpp(
-      T0, W_use, w_use, alpha_hat_scaled,
-      st$rho, st$sigma2,
+      T0,
+      W_use,
+      w_use,
+      alpha_hat_scaled,
+      st$rho,
+      st$sigma2,
       Xc_used,
-      if (K>0) st$beta else numeric(),
-      if (p>0) st$Eta else matrix(0, N, 0),
-      if (p>0) st$Gamma else matrix(0, 0, T0)
+      if (K > 0) st$beta else numeric(),
+      if (p > 0) st$Eta else matrix(0, N, 0),
+      if (p > 0) st$Gamma else matrix(0, 0, T0)
     )
     g_val <- g_fn(st, Yc_draw, Y0_pre, W_use, w_use)
     if (is.null(g_iid_mat)) {
@@ -130,19 +187,35 @@ geweke_jdt_full <- function(
   }
 
   # ---------- SC (successive-conditional) side ----------
-  if (verbose) message("[JDT] SC side (successive-conditional) ...")
-  state <- draw_initial_state(T0, N, K, p, a0, b0, W_use, w_use, alpha_hat_scaled)
+  if (verbose) {
+    message("[JDT] SC side (successive-conditional) ...")
+  }
+  state <- draw_initial_state(
+    T0,
+    N,
+    K,
+    p,
+    a0,
+    b0,
+    W_use,
+    w_use,
+    alpha_hat_scaled
+  )
 
   # burn-in
   for (m in seq_len(burn_in)) {
     Xc_used <- if (is.null(Xc_pre)) array(0, c(T0, N, 0L)) else Xc_pre
     Yc_draw <- simulate_Yc_forward_cpp(
-      T0, W_use, w_use, alpha_hat_scaled,
-      state$rho, state$sigma2,
+      T0,
+      W_use,
+      w_use,
+      alpha_hat_scaled,
+      state$rho,
+      state$sigma2,
       Xc_used,
-      if (K>0) state$beta else numeric(),
-      if (p>0) state$Eta  else matrix(0, N, 0),
-      if (p>0) state$Gamma else matrix(0, 0, T0)
+      if (K > 0) state$beta else numeric(),
+      if (p > 0) state$Eta else matrix(0, N, 0),
+      if (p > 0) state$Gamma else matrix(0, 0, T0)
     )
     state <- scspill_one_step_cpp(
       Yc_data = Yc_draw,
@@ -168,12 +241,16 @@ geweke_jdt_full <- function(
   for (m in seq_len(M2)) {
     Xc_used <- if (is.null(Xc_pre)) array(0, c(T0, N, 0L)) else Xc_pre
     Yc_draw <- simulate_Yc_forward_cpp(
-      T0, W_use, w_use, alpha_hat_scaled,
-      state$rho, state$sigma2,
+      T0,
+      W_use,
+      w_use,
+      alpha_hat_scaled,
+      state$rho,
+      state$sigma2,
       Xc_used,
-      if (K>0) state$beta else numeric(),
-      if (p>0) state$Eta  else matrix(0, N, 0),
-      if (p>0) state$Gamma else matrix(0, 0, T0)
+      if (K > 0) state$beta else numeric(),
+      if (p > 0) state$Eta else matrix(0, N, 0),
+      if (p > 0) state$Gamma else matrix(0, 0, T0)
     )
     state <- scspill_one_step_cpp(
       Yc_data = Yc_draw,
@@ -194,13 +271,17 @@ geweke_jdt_full <- function(
   }
 
   # ---------- 統計量 ----------
-  mean_iid  <- colMeans(g_iid_mat,  na.rm = TRUE)
+  mean_iid <- colMeans(g_iid_mat, na.rm = TRUE)
   mean_mcmc <- colMeans(g_mcmc_mat, na.rm = TRUE)
 
   n_iid <- colSums(is.finite(g_iid_mat))
-  se_iid <- sqrt(apply(g_iid_mat, 2, stats::var, na.rm = TRUE) / pmax(n_iid, 1L))
+  se_iid <- sqrt(
+    apply(g_iid_mat, 2, stats::var, na.rm = TRUE) / pmax(n_iid, 1L)
+  )
 
-  if (is.null(batch_size)) batch_size <- max(2L, floor(sqrt(M2)))
+  if (is.null(batch_size)) {
+    batch_size <- max(2L, floor(sqrt(M2)))
+  }
   se_mcmc <- vapply(
     seq_len(ncol(g_mcmc_mat)),
     function(j) sqrt(var_mcmc_batchmeans(g_mcmc_mat[, j], batch_size)$var_mean),
@@ -218,17 +299,22 @@ geweke_jdt_full <- function(
     se_mcmc = as.numeric(se_mcmc),
     Z = as.numeric(Z),
     pval = as.numeric(pval),
-    row.names = NULL, check.names = FALSE
+    row.names = NULL,
+    check.names = FALSE
   )
 
-  list(summary = summary,
-       details = list(M1 = M1, M2 = M2, burn_in = burn_in, batch_size = batch_size))
+  list(
+    summary = summary,
+    details = list(M1 = M1, M2 = M2, burn_in = burn_in, batch_size = batch_size)
+  )
 }
 
 # --- 最小実行例（合格確認の段階1: K=0, p=0, W=0, alpha=0） ---
+#' @keywords internal
 example_jdt_minimal <- function() {
   set.seed(1)
-  T0 <- 10; N <- 5
+  T0 <- 10
+  N <- 5
   W <- matrix(0, N, N)
   w <- rep(0, N)
   alpha_hat_scaled <- rep(0, N)
@@ -242,8 +328,11 @@ example_jdt_minimal <- function() {
     alpha_hat_scaled = alpha_hat_scaled,
     Xc_pre = NULL,
     p = 0L,
-    M1 = 2000L, M2 = 2000L, burn_in = 500L,
-    a0 = 3, b0 = 2,
+    M1 = 2000L,
+    M2 = 2000L,
+    burn_in = 500L,
+    a0 = 3,
+    b0 = 2,
     step_rho = 0.05,
     g_fn = default_g_fn,
     verbose = TRUE

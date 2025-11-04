@@ -45,3 +45,8 @@ plot(fit, type = "treated")
 ## Citation
 
 If you use this package, please cite the accompanying paper: XXX
+
+
+Data
+- World Bank DataBank: https://databank.worldbank.org/source/world-development-indicators#
+- IMF: https://data.imf.org/en/Data-Explorer?datasetUrn=IMF.STA:IMTS(1.0.0) or https://data.imf.org/en/datasets/IMF.STA:IMTS

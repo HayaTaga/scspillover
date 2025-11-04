@@ -37,9 +37,12 @@ run_mcmc_for_posterior <- function(
   K <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
 
   # --- normalize (w | W) row-wise, consistent with the model
-  nm <- normalize_joint_wW(W_raw, w_raw)
-  W <- nm$W_new
-  w <- nm$w_new
+  W_use <- row_normalize(W)
+  w_use <- as.numeric(w)
+  wsum <- sum(w_use)
+  if (is.finite(wsum) && wsum > 1e-12) {
+    w_use <- w_use / wsum
+  }
 
   # --- ensure X is a 3D array (T0 x N x K), use empty array if K=0
   X_use <- if (is.null(Xc_pre)) {
@@ -74,8 +77,8 @@ run_mcmc_for_posterior <- function(
   for (m in seq_len(M_burn)) {
     state <- scspill_one_step_cpp(
       Yc_data = Yc_obs,
-      W_use = W,
-      w_use = w,
+      W_use = W_use,
+      w_use = w_use,
       alpha_hat_scaled = alpha_hat_scaled,
       T0 = T0,
       N = N,
@@ -98,8 +101,8 @@ run_mcmc_for_posterior <- function(
   for (m in keep_indices) {
     state <- scspill_one_step_cpp(
       Yc_data = Yc_obs,
-      W_use = W,
-      w_use = w,
+      W_use = W_use,
+      w_use = w_use,
       alpha_hat_scaled = alpha_hat_scaled,
       T0 = T0,
       N = N,
@@ -179,6 +182,13 @@ prior_sensitivity <- function(
   req <- c("a0", "b0", "rho_lo", "rho_hi", "step_rho")
   stopifnot(all(req %in% names(grid)))
 
+  W_use <- row_normalize(W)
+  w_use <- as.numeric(w)
+  wsum <- sum(w_use)
+  if (is.finite(wsum) && wsum > 1e-12) {
+    w_use <- w_use / wsum
+  }
+
   out_list <- vector("list", nrow(grid))
 
   for (i in seq_len(nrow(grid))) {
@@ -190,8 +200,8 @@ prior_sensitivity <- function(
 
     res <- run_mcmc_for_posterior(
       Yc_obs = Yc_obs,
-      W_raw = W_raw,
-      w_raw = w_raw,
+      W_raw = W_use,
+      w_raw = w_use,
       alpha_hat_scaled = alpha_hat_scaled,
       Xc_pre = Xc_pre,
       p = p,
@@ -324,6 +334,14 @@ ppc_stats <- function(Yc, Y0_pre, W_use, w_use) {
   wyc <- as.numeric(Yc %*% as.numeric(w_use))
   spatial_q <- sum(diag(Yc %*% W_use %*% t(Yc))) / (N * T0)
 
+  Yd_t <- t(Yc)
+  Yd_t_centered <- scale(Yd_t, center = TRUE, scale = FALSE)
+  num_ac1 <- rowSums(
+    Yd_t_centered[, -1, drop = FALSE] * Yd_t_centered[, -T0, drop = FALSE]
+  )
+  den_ac1 <- rowSums(Yd_t_centered * Yd_t_centered)
+  ac1 <- mean(num_ac1 / den_ac1, na.rm = TRUE)
+
   ac1 <- tryCatch(
     {
       # Mean-centered across time to compute average AR(1) by unit
@@ -335,7 +353,52 @@ ppc_stats <- function(Yc, Y0_pre, W_use, w_use) {
     error = function(e) NA_real_
   )
 
+  num_ac2 <- rowSums(
+    Yd_t_centered[, -(1:2), drop = FALSE] *
+      Yd_t_centered[, -((T0 - 1):T0), drop = FALSE]
+  )
+  den_ac2 <- rowSums(Yd_t_centered * Yd_t_centered) # (ac1 と同じ)
+  ac2 <- mean(num_ac2 / den_ac2, na.rm = TRUE)
+
+  pve_pc1 <- NA_real_
+  if (N > 1 && T0 > 1) {
+    tryCatch(
+      {
+        # ユニット間の共分散行列 (N x N) または T0 x N の PCA
+        pca <- prcomp(Yc, center = TRUE, scale. = FALSE)
+        eigs <- pca$sdev^2
+        pve_pc1 <- eigs[1] / sum(eigs)
+      },
+      error = function(e) {
+        pve_pc1 <<- NA_real_
+      }
+    )
+  }
+
+  avg_skew <- NA_real_
+  avg_kurt <- NA_real_
+  if (requireNamespace("e1071", quietly = TRUE)) {
+    tryCatch(
+      {
+        # 各ユニット (列) の歪度と尖度を計算
+        avg_skew <- mean(
+          apply(Yc, 2, e1071::skewness, na.rm = TRUE),
+          na.rm = TRUE
+        )
+        avg_kurt <- mean(
+          apply(Yc, 2, e1071::kurtosis, na.rm = TRUE),
+          na.rm = TRUE
+        )
+      },
+      error = function(e) {
+        avg_skew <<- NA_real_
+        avg_kurt <<- NA_real_
+      }
+    )
+  }
+
   c(
+    # (既存の統計量)
     yc_mean = mean(yc),
     log_yc_var = log(var(yc) + 1e-12),
     spatial_quadratic = spatial_q,
@@ -344,7 +407,13 @@ ppc_stats <- function(Yc, Y0_pre, W_use, w_use) {
     } else {
       NA_real_
     },
-    ac1 = ac1
+    ac1 = ac1,
+
+    # ★ (追加された統計量)
+    ac2 = ac2,
+    pve_pc1 = pve_pc1,
+    avg_skewness = avg_skew,
+    avg_kurtosis = avg_kurt
   )
 }
 
@@ -372,21 +441,31 @@ prior_predictive <- function(
   N <- nrow(W_raw)
   K <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
 
-  # Normalize (w | W)
-  nm <- normalize_joint_wW(W_raw, w_raw)
-  W <- nm$W_new
-  w <- nm$w_new
+  W_use <- row_normalize(W)
+  w_use <- as.numeric(w)
+  wsum <- sum(w_use)
+  if (is.finite(wsum) && wsum > 1e-12) {
+    w_use <- w_use / wsum
+  }
 
   # Observed statistics (optional)
-  obs_stat <- if (!is.null(Yc_obs)) ppc_stats(Yc_obs, Y0_pre, W, w) else NULL
+  obs_stat <- if (!is.null(Yc_obs)) {
+    ppc_stats(Yc_obs, Y0_pre, W_use, w_use)
+  } else {
+    NULL
+  }
 
-  stat_mat <- matrix(NA_real_, R, 5)
+  stat_mat <- matrix(NA_real_, R, 9)
   colnames(stat_mat) <- c(
     "yc_mean",
     "log_yc_var",
     "spatial_quadratic",
     "corr_y0_wyc",
-    "ac1"
+    "ac1",
+    "ac2",
+    "pve_pc1",
+    "avg_skewness",
+    "avg_kurtosis"
   )
 
   for (r in seq_len(R)) {
@@ -397,15 +476,15 @@ prior_predictive <- function(
       p,
       a0,
       b0,
-      W,
-      w,
+      W_use,
+      w_use,
       alpha_hat_scaled,
       rho_support
     )
     Yc_sim <- simulate_Yc_forward_R(
       T0,
-      W,
-      w,
+      W_use,
+      w_use,
       alpha_hat_scaled,
       th$rho,
       th$sigma2,
@@ -414,7 +493,7 @@ prior_predictive <- function(
       th$Eta,
       th$Gamma
     )
-    stat_mat[r, ] <- ppc_stats(Yc_sim, Y0_pre, W, w)
+    stat_mat[r, ] <- ppc_stats(Yc_sim, Y0_pre, W_use, w_use)
   }
 
   list(
@@ -453,4 +532,48 @@ prior_predictive_plot <- function(pp_out, main_prefix = "Prior predictive") {
     }
   }
   invisible(NULL)
+}
+
+#' Row-normalize a spatial weights matrix W
+#'
+#' Ensures that the sum of each row is 1.
+#' Sets the diagonal to 0 and handles rows that sum to 0.
+#'
+#' @param W A numeric matrix.
+#' @param tol Tolerance for checking if a row sum is zero.
+#' @param zero_policy How to handle rows that sum to zero (or are close to it).
+#'   "keep" (default): leaves the row as all zeros.
+#'   "uniform": (not implemented here, but common) sets to 1/N.
+#' @return A row-normalized matrix.
+#'
+row_normalize <- function(W, tol = 1e-12, zero_policy = c("keep")) {
+  zero_policy <- match.arg(zero_policy)
+
+  if (!is.matrix(W) || !is.numeric(W)) {
+    stop("W must be a numeric matrix.")
+  }
+
+  # Ensure diagonal is zero (no self-loops)
+  diag(W) <- 0
+
+  # Calculate row sums
+  rs <- rowSums(W, na.rm = TRUE)
+
+  # Find rows that are not zero (or very close to it)
+  nz <- rs > tol
+
+  # Normalize non-zero rows
+  if (any(nz)) {
+    W[nz, ] <- W[nz, , drop = FALSE] / rs[nz]
+  }
+
+  # Handle zero-sum rows (if any)
+  if (any(!nz)) {
+    if (zero_policy == "keep") {
+      # Do nothing, leave the row as all zeros
+      W[!nz, ] <- 0 # Ensure it's clean
+    }
+  }
+
+  W
 }

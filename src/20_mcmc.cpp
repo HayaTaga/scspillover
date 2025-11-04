@@ -180,7 +180,7 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
                                       const arma::vec& alpha_hat_in,     // N (unscaled, matches Yc_pre)
                                       Rcpp::Nullable<Rcpp::NumericVector> Xc_pre_, // (T0*N*K)
                                       int T0, int N, int K, int p,
-                                      const arma::vec& w_in,             // N
+                                      const arma::vec& w,             // N
                                       const arma::mat& W,                // N x N
                                       int iteration, int burn,
                                       double step_rho = 0.01,
@@ -201,11 +201,6 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     Yc.col(j) = Yc_orig.col(j) / sdj;
   }
   arma::vec alpha = alpha_hat_in / sds_Yc; // N
-
-  // normalize w
-  arma::vec w = w_in;
-  double wnorm = std::sqrt(arma::dot(w, w));
-  if (wnorm > 0.0) w /= wnorm;
 
   // X accessor
   const bool useX = (K > 0) && Xc_pre_.isNotNull();

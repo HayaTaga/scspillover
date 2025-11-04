@@ -16,6 +16,26 @@ The JDT forms a Z-statistic comparing the two Monte Carlo estimates.
 We create a simulated spatial–spillover synthetic control environment with covariates and one latent factor. The forward data generating mechanism matches the structural SAR spillover model used by the MCMC kernel.
 
 ```{r}
+rm(list = ls())
+# library(scspill)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(knitr)
+library(kableExtra)
+
+source("R/01_utils.R")
+source("R/10_sc_spillover.R")
+source("R/21_mcmc_alpha.R")
+source("R/22_mcmc_sar.R")
+source("R/30_simulation_.R")
+source("R/40_geweke_latest.R")
+source("R/41_robustness_check.R")
+Rcpp::sourceCpp("src/20_mcmc.cpp")
+Rcpp::sourceCpp("src/40_geweke_latest.cpp")
+```
+
+```{r}
 # --- dimensions ---
 T0 <- 15
 N <- 8
@@ -33,20 +53,12 @@ for (i in 1:N) {
 w_raw <- rep(0, N)
 w_raw[1] <- 1
 
-normalize_joint_wW <- function(W, w) {
-  stopifnot(nrow(W) == length(w), ncol(W) == nrow(W))
-  joint <- cbind(w, W)
-  rs <- rowSums(joint)
-  rs[rs == 0] <- 1
-  joint_norm <- joint / rs
-  list(
-    W_new = joint_norm[, -1, drop = FALSE],
-    w_new = joint_norm[, 1, drop = TRUE]
-  )
+W_use <- row_normalize(W)
+w_use <- as.numeric(w)
+wsum <- sum(w_use)
+if (is.finite(wsum) && wsum > 1e-12) {
+  w_use <- w_use / wsum
 }
-normed <- normalize_joint_wW(W_raw, w_raw)
-W_use <- normed$W_new
-w_use <- normed$w_new
 
 # fixed alpha_hat_scaled (in practice, scale BSCM alpha)
 alpha_hat_scaled <- rnorm(N, 0, 0.4)
@@ -122,14 +134,6 @@ sim_forward_R <- function(
 
 # pseudo observed treated pre-outcome (for g-function)
 Y0_pre <- rnorm(T0)
-
-# JDT parameters
-M1 <- 1000000L # MC path draws
-M2 <- 1000000L # SC path draws
-burn_in <- 2000000L
-
-# C++ functions (simulate_Yc_forward_cpp / scspill_one_step_cpp)
-# are assumed pre-registered in the package.
 ```
 
 ---
@@ -139,7 +143,12 @@ burn_in <- 2000000L
 The function `geweke_jdt_full()` executes the marginal–conditional (MC) and successive-conditional (SC) simulators and reports Z-statistics comparing the expectations of user-defined statistics \(g(\theta,y)\).
 
 ```{r}
-out_ok <- geweke_jdt_full(
+# JDT parameters
+M1 <- 2000000L # MC path draws
+M2 <- 2000000L # SC path draws
+burn_in <- 2000000L
+
+out <- geweke_jdt_full(
   Y0_pre = Y0_pre,
   Yc_pre_like_dims = c(T0, N),
   W_raw = W_use,
@@ -157,7 +166,80 @@ out_ok <- geweke_jdt_full(
   verbose = TRUE
 )
 
-print(out_ok$summary)
+print(out$summary)
+
+write.csv(out$summary, "inst/tables/geweke_jdt_summary.csv", row.names = FALSE)
+```
+
+```{r}
+jdt_tbl <- out$summary
+knitr::kable(jdt_tbl, caption = "Appendix JDT summary (MC vs. SC path).")
+
+jdt_tex <- kableExtra::kable(
+  jdt_tbl,
+  format = "latex",
+  booktabs = TRUE,
+  caption = "Appendix JDT summary (MC vs. SC path)."
+)
+cat(jdt_tex, file = "./inst/tables/geweke_jdt_summary.tex")
+```
+
+```{r}
+thin_app <- 5L
+out_app_thin <- geweke_jdt_full(
+  Y0_pre = Y0_pre,
+  Yc_pre_like_dims = c(T0, N),
+  W_raw = W_use,
+  w_raw = w_use,
+  alpha_hat_scaled = alpha_hat_scaled,
+  Xc_pre = Xc_pre,
+  p = p,
+  M1 = M1, # MC path unchanged
+  M2 = M2 * thin_app, # run longer then thin inside g_fn if you implement that
+  burn_in = burn_in,
+  a0 = a0,
+  b0 = b0,
+  step_rho = 0.05,
+  g_fn = default_g_fn,
+  verbose = FALSE,
+  rho_support = NULL
+)
+
+# (b) Custom g-function (example): centered squared norm of Y and rho^2
+g_fn_custom <- function(theta, Y, W, w, Y0_pre) {
+  yc <- as.numeric(Y)
+  c(
+    rho = theta$rho,
+    rho_sq = theta$rho^2,
+    log_sigma2 = log(theta$sigma2 + 1e-12),
+    yc_mean = mean(yc),
+    yc_center_q = mean((yc - mean(yc))^2)
+  )
+}
+
+out_app_custom <- geweke_jdt_full(
+  Y0_pre = Y0_pre,
+  Yc_pre_like_dims = c(T0, N),
+  W_raw = W_use,
+  w_raw = w_use,
+  alpha_hat_scaled = alpha_hat_scaled,
+  Xc_pre = Xc_pre,
+  p = p,
+  M1 = M1,
+  M2 = M2,
+  burn_in = burn_in,
+  a0 = a0,
+  b0 = b0,
+  step_rho = 0.05,
+  g_fn = g_fn_custom, # <- custom statistics
+  verbose = FALSE,
+  rho_support = NULL
+)
+
+knitr::kable(
+  out_app_custom$summary,
+  caption = "Appendix JDT with custom g-function."
+)
 ```
 
 ---
@@ -174,26 +256,6 @@ print(out_ok$summary)
 
 > **Important:**  
 > JDT requires **exact equality** of the prior, likelihood, and support used in the MC simulator and those implicitly assumed in the MCMC transition kernel. Any discrepancy will — correctly — trigger rejections.
-
----
-
-## Diagnostics (optional)
-
-```{r}
-if (!is.null(out_ok$rho_trace)) {
-  plot(
-    out_ok$rho_trace,
-    type = "l",
-    main = "rho trace (SC path)",
-    xlab = "iteration",
-    ylab = "rho"
-  )
-}
-
-if (!is.null(out_ok$accept_rate_rho_proxy)) {
-  cat("Acceptance proxy for rho:", round(out_ok$accept_rate_rho_proxy, 3), "\n")
-}
-```
 
 ---
 

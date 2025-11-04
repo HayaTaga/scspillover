@@ -1,11 +1,11 @@
 #' scspill: Diagnostics (trace plots, multi-parameter)
 #'
 #' @param object scspill オブジェクト
-#' @param what   "trace" のみをサポート（将来拡張用）
-#' @param which_alpha  alpha の表示ユニット（文字=ユニット名 or 数値=列番号）。NULL なら top_n_alpha を自動選抜
-#' @param top_n_alpha  which_alpha 未指定時に |alpha_hat| の大きい順に抽出する数（既定 6）
-#' @param which_beta   beta の表示（colnames or 列番号）。NULL なら top_n_beta を自動選抜（あれば）
-#' @param top_n_beta   which_beta 未指定時の抽出数（既定 6）
+#' @param what   現状 "trace" のみ
+#' @param which_alpha  "all" で全 alpha、文字ベクトル/整数ベクトルで列指定、NULL なら "all"
+#' @param top_n_alpha  which_alpha が NULL でも "all" 以外を明示したい場合の上位抽出数
+#' @param which_beta   "all" で全 beta、文字ベクトル/整数ベクトルで列指定、NULL なら "all"
+#' @param top_n_beta   which_beta が NULL でも "all" 以外を明示したい場合の上位抽出数
 #' @export
 diagnostics.scspill <- function(
   object,
@@ -20,7 +20,7 @@ diagnostics.scspill <- function(
     stop("Currently only what='trace' is supported.")
   }
 
-  # ---------- helper diagnostics ----------
+  # ------------ helpers ------------
   .safe_quant <- function(x, probs = c(0.025, 0.05, 0.5, 0.95, 0.975)) {
     stats::quantile(
       as.numeric(x),
@@ -50,7 +50,7 @@ diagnostics.scspill <- function(
       return(NA_real_)
     }
     pos <- ac[ac > 0]
-    tau <- if (length(pos) == 0) 1.0 else 1.0 + 2.0 * sum(pos)
+    tau <- if (length(pos) == 0) 1 else 1 + 2 * sum(pos)
     ess <- n / tau
     max(1.0, min(ess, n))
   }
@@ -78,14 +78,13 @@ diagnostics.scspill <- function(
     as.numeric(sqrt(var_hat / W))
   }
   .mcse_from_ess <- function(x, ess) {
-    x <- as.numeric(x)
-    s <- stats::sd(x, na.rm = TRUE)
+    s <- stats::sd(as.numeric(x), na.rm = TRUE)
     if (!is.finite(ess) || ess <= 0) {
       return(NA_real_)
     }
     s / sqrt(ess)
   }
-  .geweke_z <- function(x, frac1 = 0.1, frac2 = 0.5) {
+  .geweke_z <- function(x, frac1 = .1, frac2 = .5) {
     x <- as.numeric(x)
     n <- length(x)
     if (n < 30) {
@@ -140,11 +139,10 @@ diagnostics.scspill <- function(
     paste0("unit_", seq_len(n_cols))
   }
 
-  # ---- 収集：rho / alpha / sigma2 / tau2 / beta（存在すれば）を縦持ちで結合 ----
-  out_list_df <- list() # trace 用（データフレーム）
-  out_series <- list() # 診断値用（ベクトル）
+  out_list_df <- list() # for plotting
+  out_series <- list() # for diagnostics table
 
-  # rho
+  # ----- rho -----
   if (!is.null(object$rho_draws)) {
     vals <- as.numeric(object$rho_draws)
     out_list_df[["rho"]] <- data.frame(
@@ -155,16 +153,19 @@ diagnostics.scspill <- function(
     out_series[["rho"]] <- vals
   }
 
-  # alpha（上位 or 指定）
+  # ----- alpha (all by default) -----
   if (!is.null(object$alpha_draws)) {
     unit_names <- .get_units_control(object, ncol(object$alpha_draws))
-    # 選抜
+    # 既定は "all"
     if (is.null(which_alpha)) {
-      ah <- tryCatch(as.numeric(object$alpha_hat), error = function(e) NULL)
-      if (is.null(ah)) {
-        ah <- colMeans(object$alpha_draws)
-      }
-      sel <- head(order(-abs(ah)), n = min(top_n_alpha, length(ah)))
+      which_alpha <- "all"
+    }
+    if (
+      is.character(which_alpha) &&
+        length(which_alpha) == 1L &&
+        which_alpha == "all"
+    ) {
+      sel <- seq_len(ncol(object$alpha_draws))
     } else if (is.character(which_alpha)) {
       m <- match(which_alpha, unit_names)
       if (anyNA(m)) {
@@ -180,7 +181,12 @@ diagnostics.scspill <- function(
         stop("'which_alpha' indices out of range.")
       }
     } else {
-      stop("'which_alpha' must be NULL, character, or numeric.")
+      # 後方互換：上位抽出
+      ah <- tryCatch(as.numeric(object$alpha_hat), error = function(e) NULL)
+      if (is.null(ah)) {
+        ah <- colMeans(object$alpha_draws)
+      }
+      sel <- head(order(-abs(ah)), n = min(top_n_alpha, length(ah)))
     }
     iters <- seq_len(nrow(object$alpha_draws))
     for (j in sel) {
@@ -191,7 +197,7 @@ diagnostics.scspill <- function(
     }
   }
 
-  # sigma2 / tau2
+  # ----- sigma2 / tau2 -----
   if (!is.null(object$sar) && !is.null(object$sar$sigma2_draws)) {
     vals <- as.numeric(object$sar$sigma2_draws)
     out_list_df[["sigma2"]] <- data.frame(
@@ -211,7 +217,7 @@ diagnostics.scspill <- function(
     out_series[["tau2"]] <- vals
   }
 
-  # beta（M x K）
+  # ----- beta (all by default) -----
   if (!is.null(object$sar) && !is.null(object$sar$beta)) {
     beta_draws <- object$sar$beta
     K <- ncol(beta_draws)
@@ -221,8 +227,14 @@ diagnostics.scspill <- function(
     }
 
     if (is.null(which_beta)) {
-      bm <- colMeans(beta_draws)
-      selb <- head(order(-abs(bm)), n = min(top_n_beta, length(bm)))
+      which_beta <- "all"
+    }
+    if (
+      is.character(which_beta) &&
+        length(which_beta) == 1L &&
+        which_beta == "all"
+    ) {
+      selb <- seq_len(K)
     } else if (is.character(which_beta)) {
       mb <- match(which_beta, beta_names)
       if (anyNA(mb)) {
@@ -236,7 +248,8 @@ diagnostics.scspill <- function(
       selb <- as.integer(which_beta)
       if (any(selb < 1 | selb > K)) stop("'which_beta' indices out of range.")
     } else {
-      stop("'which_beta' must be NULL, character, or numeric.")
+      bm <- colMeans(beta_draws)
+      selb <- head(order(-abs(bm)), n = min(top_n_beta, length(bm)))
     }
 
     iters <- seq_len(nrow(beta_draws))
@@ -255,16 +268,16 @@ diagnostics.scspill <- function(
   # ---- trace plot ----
   df <- do.call(rbind, out_list_df)
   p <- ggplot2::ggplot(df, ggplot2::aes(iter, value)) +
-    ggplot2::geom_line() +
+    ggplot2::geom_line(linewidth = 0.3) +
     ggplot2::facet_wrap(~series, scales = "free_y") +
     ggplot2::theme_minimal() +
     ggplot2::labs(
       x = "Iteration",
       y = "Value",
-      title = "Trace plots (rho / alpha / sigma2 / tau2 / beta)"
+      title = "Trace plots (rho / alpha / beta / sigma2 / tau2)"
     )
 
-  # ---- summary diagnostics table（属性として付与）----
+  # ---- summary table ----
   tab <- do.call(
     rbind,
     lapply(names(out_series), function(nm) {
@@ -274,7 +287,7 @@ diagnostics.scspill <- function(
       ess <- .ess_acf(x)
       mcse <- .mcse_from_ess(x, ess)
       act <- if (is.finite(ess)) n / ess else NA_real_
-      rhat <- .rhat_split(x, n_splits = 2L)
+      rhat <- .rhat_split(x, 2L)
       gz <- .geweke_z(x)
       data.frame(
         parameter = nm,
@@ -291,12 +304,11 @@ diagnostics.scspill <- function(
         act = act,
         rhat_split = rhat,
         geweke_z = gz,
-        stringsAsFactors = FALSE
+        row.names = NULL,
+        check.names = FALSE
       )
     })
   )
-  rownames(tab) <- NULL
   attr(p, "summary") <- tab
-
-  return(p)
+  p
 }

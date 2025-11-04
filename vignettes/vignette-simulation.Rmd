@@ -22,10 +22,24 @@ The following functions are assumed to be already installed and available (part 
 - `mc_grid_study()`: Grid simulation across (N, T0, ρ) values  
 
 ```{r setup, message=FALSE, warning=FALSE}
+rm(list = ls())
 library(scspill)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(stringr)
+library(knitr)
+library(kableExtra)
+
+source("R/01_utils.R")
+source("R/10_sc_spillover.R")
+source("R/21_mcmc_alpha.R")
+source("R/22_mcmc_sar.R")
+source("R/30_simulation_.R")
+source("R/40_geweke_latest.R")
+source("R/41_robustness_check.R")
+Rcpp::sourceCpp("src/20_mcmc.cpp")
+Rcpp::sourceCpp("src/40_geweke_latest.cpp")
 
 # Assume the simulation engine functions are already part of the package
 set.seed(20251030)
@@ -220,22 +234,35 @@ mc_grid_study <- function(
 
 
 ```{r run-grid}
-study <- mc_grid_study(
-  Ns = c(16, 36, 64), # grid size: 4×4 and 6×6
-  T0s = c(30, 60), # pre-period length
-  rhos = c(0.3), # spatial coefficient
-  T1 = 20, # post-treatment length (20 or 50)
-  sims_per = 10, # repetitions per scenario
-  K = 1, # number of covariates
-  beta = c(1.0), # true regression slope
-  sigma2 = 1.0, # innovation variance
-  treated_idx = 1:4, # treated units
-  M = 5000, # MCMC iterations
-  burn = 1000, # burn-in
-  step_rho = 0.15 # MH step size
-)
+output_dir <- "inst/tables/mc_result"
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
 
-head(study$summary, 10)
+for (N in c(64)) {
+  # c(16, 36, 64)
+  for (T0 in c(50)) {
+    # c(20, 50)
+    study <- mc_grid_study(
+      Ns = c(N), # grid size: 4×4 and 6×6
+      T0s = c(T0), # pre-period length
+      rhos = c(-0.8, -0.3, 0.0, 0.3, 0.8), # spatial coefficient c(-0.8, -0.3, 0.0, 0.3, 0.8)
+      T1 = 20, # post-treatment length (20 or 50)
+      sims_per = 1000, # repetitions per scenario
+      K = 1, # number of covariates
+      beta = c(1.0), # true regression slope
+      sigma2 = 1.0, # innovation variance
+      treated_idx = 1:4, # treated units
+      M = 50000, # MCMC iterations
+      burn = 25000, # burn-in
+      step_rho = 0.05 # MH step size
+    )
+    output_path <- paste0(output_dir, "/mc_study_N=", N, "T0=", T0, ".csv")
+    write.csv(study$summary, output_path, row.names = FALSE)
+    rm(study)
+  }
+}
+
 ```
 
 The output table contains, for each scenario and estimation method:
@@ -247,183 +274,168 @@ The output table contains, for each scenario and estimation method:
 # Bias and RMSE Plots
 
 ```{r plot-bias-rmse, fig.width=7, fig.height=5}
-# ---------- Helpers: build table blocks (Bias / RMSE) ----------
-build_block_wide <- function(
-  df_panel,
-  metric = c("bias", "rmse"),
-  methods_order = c("Proposed", "SCM", "BSCM"),
-  digits = 3
-) {
-  metric <- match.arg(metric)
-  value_col <- if (metric == "bias") "bias_point" else "rmse_point"
-
-  agg <- df_panel %>%
-    group_by(rho, N, method) %>%
-    summarise(value = mean(.data[[value_col]], na.rm = TRUE), .groups = "drop")
-
-  Ns <- sort(unique(agg$N))
-  agg$method <- factor(agg$method, levels = methods_order)
-
-  wide <- agg %>%
-    mutate(col = paste0("N", N, "::", as.character(method))) %>%
-    select(rho, col, value) %>%
-    tidyr::pivot_wider(names_from = col, values_from = value) %>%
-    arrange(rho)
-
-  num_cols <- setdiff(colnames(wide), "rho")
-  wide[num_cols] <- lapply(wide[num_cols], function(x) {
-    sprintf(paste0("%.", digits, "f"), x)
-  })
-
-  col_order <- unlist(lapply(Ns, function(n) {
-    paste0("N", n, "::", methods_order)
-  }))
-  wide <- wide[, c("rho", col_order), drop = FALSE]
-  attr(wide, "Ns") <- Ns
-  attr(wide, "methods_order") <- methods_order
-  wide
+# 論文体裁のパネル表を生成（LaTeX向け）
+# 表示名を統一（SCSPILL -> Proposed）し、順序を固定
+normalize_methods <- function(df) {
+  df %>%
+    mutate(
+      method = recode(method, SCSPILL = "Proposed"),
+      method = factor(method, levels = c("Proposed", "SCM", "BSCM")),
+      N = as.integer(N)
+    )
 }
 
-# ---------- Combine Bias + RMSE with a dashed separator ----------
-combine_bias_rmse <- function(bias_wide, rmse_wide) {
-  stopifnot(identical(colnames(bias_wide), colnames(rmse_wide)))
-  common_cols <- colnames(bias_wide)
+# 欠け組を安全に補完（NA 埋め）
+complete_grid <- function(df) {
+  df %>%
+    complete(
+      N,
+      T0,
+      T1,
+      rho,
+      method = factor(
+        c("Proposed", "SCM", "BSCM"),
+        levels = c("Proposed", "SCM", "BSCM")
+      ),
+      fill = list(bias_point = NA_real_, rmse_point = NA_real_)
+    )
+}
 
-  out <- dplyr::bind_rows(
-    bias_wide,
-    setNames(as.list(rep("—", length(common_cols))), common_cols),
-    rmse_wide
+# 内部ユーティリティ: wide への整形（列名を "{N}:{method}" に固定）
+pivot_metric <- function(df, metric) {
+  df %>%
+    select(N, T0, T1, rho, method, value = .data[[metric]]) %>%
+    pivot_wider(
+      names_from = c(N, method),
+      values_from = value,
+      names_glue = "{N}:{method}"
+    )
+}
+
+stack_bias_rmse <- function(wide_bias, wide_rmse, rho_order, N_levels) {
+  col_keys <- expand.grid(
+    N = N_levels,
+    method = c("Proposed", "SCM", "BSCM"),
+    stringsAsFactors = FALSE
+  ) %>%
+    mutate(key = paste0(N, ":", method)) %>%
+    pull(key)
+
+  pick <- intersect(col_keys, names(wide_bias))
+  wide_bias <- wide_bias %>%
+    mutate(rho = factor(rho, levels = rho_order)) %>%
+    arrange(rho) %>%
+    select(rho, all_of(pick))
+
+  wide_rmse <- wide_rmse %>%
+    mutate(rho = factor(rho, levels = rho_order)) %>%
+    arrange(rho) %>%
+    select(rho, all_of(pick))
+
+  bias_block <- wide_bias %>%
+    mutate(Measure = "Bias") %>%
+    relocate(Measure, .before = rho)
+  rmse_block <- wide_rmse %>%
+    mutate(Measure = "RMSE") %>%
+    relocate(Measure, .before = rho)
+
+  list(
+    bias = bias_block,
+    rmse = rmse_block,
+    col_keys = pick,
+    N_levels = N_levels
   )
-  out
 }
 
-# ---------- Two-row headers for kable ----------
-make_kable_header <- function(wide_df) {
-  Ns <- attr(wide_df, "Ns")
-  methods <- attr(wide_df, "methods_order")
+# 1 パネル（特定の T0）を作成
+make_panel_table <- function(
+  df,
+  T0_target,
+  rho_order = c(-0.8, -0.3, -0.1, 0.0, 0.1, 0.3, 0.8),
+  caption = NULL
+) {
+  df1 <- df %>% filter(T0 == T0_target)
 
-  top <- c(" " = 1) # for 'Block'/'rho' columns later
-  for (n in Ns) {
-    top[paste0("$N=", n, "$")] <- length(methods)
-  }
+  N_levels <- sort(unique(df1$N))
 
-  second <- c(" $\\rho$ " = 1)
-  for (n in Ns) {
-    second <- c(second, setNames(rep(methods, 1), methods))
-  }
-  list(top = top, second = second)
+  wb <- pivot_metric(df1, "bias_point")
+  wr <- pivot_metric(df1, "rmse_point")
+
+  blocks <- stack_bias_rmse(wb, wr, rho_order, N_levels = N_levels)
+  bias_block <- blocks$bias
+  rmse_block <- blocks$rmse
+  key_cols <- blocks$col_keys
+
+  panel_df <- bind_rows(bias_block, rmse_block)
+
+  bottom_labels <- c(
+    "Measure",
+    "$\\rho$",
+    rep(c("Proposed", "SCM", "BSCM"), length(c(16, 36, 64)))
+  )
+  spanners <- setNames(
+    rep(3, length(N_levels)),
+    paste0("$N=", N_levels, "$")
+  )
+
+  # テーブル本体
+  kb <- panel_df %>%
+    mutate(across(-c(Measure, rho), ~ ifelse(is.na(.x), NA, round(.x, 3)))) %>%
+    kable(
+      format = "latex",
+      booktabs = TRUE,
+      escape = FALSE,
+      col.names = c(
+        "Measure",
+        "$\\rho$",
+        rep(c("Proposed", "SCM", "BSCM"), length(N_levels))
+      ),
+      align = c("l", "c", rep("r", length(key_cols))),
+      caption = caption
+    ) %>%
+    add_header_above(c(" " = 2, spanners)) %>%
+    kable_styling(latex_options = c("hold_position")) %>%
+    row_spec(
+      nrow(bias_block),
+      extra_latex_after = "\\midrule[.2pt] \\addlinespace[0.25em]"
+    )
+
+  kb
 }
 ```
 
 # Render Panel
 
 ```{r plot-coverage, fig.width=7, fig.height=4}
-render_panel_table <- function(
-  summary_df,
-  T0_target,
-  methods_order = c("Proposed", "SCM", "BSCM"),
-  digits = 3,
-  caption = NULL
-) {
-  df_panel <- summary_df %>% filter(T0 == T0_target)
-  stopifnot(nrow(df_panel) > 0)
-
-  bias_w <- build_block_wide(
-    df_panel,
-    metric = "bias",
-    methods_order = methods_order,
-    digits = digits
-  )
-  rmse_w <- build_block_wide(
-    df_panel,
-    metric = "rmse",
-    methods_order = methods_order,
-    digits = digits
-  )
-  merged <- combine_bias_rmse(bias_w, rmse_w)
-
-  hdr <- make_kable_header(bias_w)
-
-  # locate dashed-separator row (filled with em-dashes)
-  dash_row <- which(merged[[1]] == "—")
-  if (length(dash_row) == 1L) {
-    merged[dash_row, ] <- lapply(merged[dash_row, ], function(x) "")
-  }
-
-  # prepend block labels: 'Bias' and 'RMSE' stubs
-  rhos <- sort(unique(df_panel$rho))
-  n_rho <- length(rhos)
-  block_label <- c(rep("Bias", n_rho), "", rep("RMSE", n_rho))
-  merged <- cbind(Block = block_label, merged)
-
-  kb <- kable(
-    merged,
-    format = "latex",
-    booktabs = TRUE,
-    escape = FALSE,
-    caption = caption,
-    align = c("l", "r", rep("r", ncol(merged) - 2))
-  ) %>%
-    kableExtra::kable_styling(latex_options = c("hold_position")) %>%
-    add_header_above(hdr$second, escape = FALSE) %>%
-    add_header_above(hdr$top, escape = FALSE)
-
-  if (length(dash_row) == 1L) {
-    kb <- kb %>%
-      kableExtra::row_spec(dash_row + 1, extra_latex_after = "\\hdashline")
-  }
-  kb
-}
-```
-
-# Inspecting Raw Output for One Scenario
-
-```{r inspect-scenario}
-unique_T0 <- sort(unique(study$summary$T0))
-panel_caption <- paste0(
-  "Simulation Results for Bias and RMSE \\quad (Panel (a): $T_0 = ",
-  unique_T0[1],
-  "$)"
-)
-
-panel_a <- render_panel_table(
-  summary_df = study$summary,
-  T0_target = unique_T0[1],
-  methods_order = c("Proposed", "SCM", "BSCM"),
-  digits = 3,
-  caption = panel_caption
-)
-
-panel_a
-```
-
-```{r}
-if (length(unique_T0) >= 2) {
-  for (j in 2:length(unique_T0)) {
-    cat(sprintf("**Panel (%s):** $T_0 = %d$\n\n", letters[j], unique_T0[j]))
-    print(
-      render_panel_table(
-        summary_df = study$summary,
-        T0_target = unique_T0[j],
-        methods_order = c("Proposed", "SCM", "BSCM"),
-        digits = 3,
-        caption = paste0(
-          "Simulation Results for Bias and RMSE \\quad (Panel (",
-          letters[j],
-          "): $T_0 = ",
-          unique_T0[j],
-          "$)"
-        )
-      )
-    )
-    cat("\n\n")
+base_dir <- "inst/tables/mc_result"
+study <- data.frame()
+for (N in c(16, 36, 64)) {
+  for (T0 in c(20, 50)) {
+    output_path <- paste0(output_dir, "/mc_study_N=", N, "T0=", T0, ".csv")
+    df_tmp <- read.csv(output_path)
+    study <- study %>% rbind(df_tmp)
   }
 }
+
+df_ready <- study %>%
+  normalize_methods() %>%
+  complete_grid()
+
+spanners <- c("Baseline" = 3, "Follow-up" = 2) # 例：計5列がスパナー対象
+tab_a <- make_panel_table(
+  df_ready,
+  T0_target = 20,
+  caption = "Panel (a): $T_0=20$"
+)
+tab_a
 ```
+
+
 
 ```{r}
 # Save the LaTeX code for the main panel to a .tex file for inclusion in the manuscript.
-save_kable(panel_a, file = "./data/table_sim_panel_a.tex")
+table_tex <- capture.output(tab_a, collapse = "\n")
+writeLines(table_tex, "./inst/tables/simulation_tables.tex")
 ```
 
 ```{r}

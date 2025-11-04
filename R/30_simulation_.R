@@ -43,25 +43,6 @@ make_w <- function(N, treated = 1L) {
   w
 }
 
-#' @keywords internal
-normalize_joint_wW <- function(W, w) {
-  stopifnot(is.matrix(W))
-  stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))
-
-  N <- nrow(W)
-  joint <- cbind(w, W)
-
-  rs <- rowSums(joint)
-  rs[rs == 0] <- 1
-
-  joint_norm <- joint / rs
-
-  w_new <- joint_norm[, 1, drop = TRUE]
-  W_new <- joint_norm[, -1, drop = FALSE]
-
-  list(W_new = W_new, w_new = w_new)
-}
-
 .scspill_cf_post <- function(
   Y0_post,
   Yc_post,
@@ -72,8 +53,7 @@ normalize_joint_wW <- function(W, w) {
 ) {
   N <- length(alpha_hat)
   IN <- diag(N)
-
-  w_use <- w / sum(w)
+  w_use <- w
 
   Ainv <- solve(IN - rho_hat * (w_use %*% t(alpha_hat) + W))
   B <- (IN - rho_hat * W)
@@ -157,10 +137,12 @@ scspill_sim_dgp <- function(
 
   IN <- diag(N)
 
-  joint_norm <- normalize_joint_wW(W, w)
-  W_use <- joint_norm$W_new
-  w_use <- joint_norm$w_new
-
+  W_use <- row_normalize(W)
+  w_use <- as.numeric(w)
+  wsum <- sum(w_use)
+  if (is.finite(wsum) && wsum > 1e-12) {
+    w_use <- w_use / wsum
+  }
   # (A) no-treatment
   A_pre <- IN - rho * W_use - rho * (w_use %*% t(alpha))
   rcA <- tryCatch(rcond(A_pre), error = function(e) NA_real_)
@@ -360,7 +342,7 @@ run_one_sim <- function(
     N = N,
     K = K,
     p = 0, # シミュレーションは p=0 (因子なし) を仮定
-    w_in = as.numeric(w),
+    w = as.numeric(w),
     W = W,
     iteration = M,
     burn = burn,
@@ -609,4 +591,49 @@ summarize_many <- function(results) {
   out <- out[order(as.integer(out$method)), , drop = FALSE]
   rownames(out) <- NULL
   out
+}
+
+
+#' Row-normalize a spatial weights matrix W
+#'
+#' Ensures that the sum of each row is 1.
+#' Sets the diagonal to 0 and handles rows that sum to 0.
+#'
+#' @param W A numeric matrix.
+#' @param tol Tolerance for checking if a row sum is zero.
+#' @param zero_policy How to handle rows that sum to zero (or are close to it).
+#'   "keep" (default): leaves the row as all zeros.
+#'   "uniform": (not implemented here, but common) sets to 1/N.
+#' @return A row-normalized matrix.
+#'
+row_normalize <- function(W, tol = 1e-12, zero_policy = c("keep")) {
+  zero_policy <- match.arg(zero_policy)
+
+  if (!is.matrix(W) || !is.numeric(W)) {
+    stop("W must be a numeric matrix.")
+  }
+
+  # Ensure diagonal is zero (no self-loops)
+  diag(W) <- 0
+
+  # Calculate row sums
+  rs <- rowSums(W, na.rm = TRUE)
+
+  # Find rows that are not zero (or very close to it)
+  nz <- rs > tol
+
+  # Normalize non-zero rows
+  if (any(nz)) {
+    W[nz, ] <- W[nz, , drop = FALSE] / rs[nz]
+  }
+
+  # Handle zero-sum rows (if any)
+  if (any(!nz)) {
+    if (zero_policy == "keep") {
+      # Do nothing, leave the row as all zeros
+      W[!nz, ] <- 0 # Ensure it's clean
+    }
+  }
+
+  W
 }

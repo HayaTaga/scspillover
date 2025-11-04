@@ -1,19 +1,50 @@
 # 40_geweke_full.R
 
 # --- 前処理ユーティリティ ---
-#' @keywords internal
-normalize_joint_wW <- function(W, w) {
-  stopifnot(is.matrix(W))
-  stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))
-  N <- nrow(W)
-  joint <- cbind(w, W)
-  rs <- rowSums(joint)
-  rs[rs == 0] <- 1
-  joint_norm <- joint / rs
-  w_new <- joint_norm[, 1, drop = TRUE]
-  W_new <- joint_norm[, -1, drop = FALSE]
-  list(W_new = W_new, w_new = w_new)
+#' Row-normalize a spatial weights matrix W
+#'
+#' Ensures that the sum of each row is 1.
+#' Sets the diagonal to 0 and handles rows that sum to 0.
+#'
+#' @param W A numeric matrix.
+#' @param tol Tolerance for checking if a row sum is zero.
+#' @param zero_policy How to handle rows that sum to zero (or are close to it).
+#'   "keep" (default): leaves the row as all zeros.
+#'   "uniform": (not implemented here, but common) sets to 1/N.
+#' @return A row-normalized matrix.
+#'
+row_normalize <- function(W, tol = 1e-12, zero_policy = c("keep")) {
+  zero_policy <- match.arg(zero_policy)
+
+  if (!is.matrix(W) || !is.numeric(W)) {
+    stop("W must be a numeric matrix.")
+  }
+
+  # Ensure diagonal is zero (no self-loops)
+  diag(W) <- 0
+
+  # Calculate row sums
+  rs <- rowSums(W, na.rm = TRUE)
+
+  # Find rows that are not zero (or very close to it)
+  nz <- rs > tol
+
+  # Normalize non-zero rows
+  if (any(nz)) {
+    W[nz, ] <- W[nz, , drop = FALSE] / rs[nz]
+  }
+
+  # Handle zero-sum rows (if any)
+  if (any(!nz)) {
+    if (zero_policy == "keep") {
+      # Do nothing, leave the row as all zeros
+      W[!nz, ] <- 0 # Ensure it's clean
+    }
+  }
+
+  W
 }
+
 
 #' @keywords internal
 compute_bnd <- function(W_use, w_use, alpha_hat_scaled, c_stability = 0.95) {
@@ -136,7 +167,8 @@ geweke_jdt_full <- function(
   step_rho = 0.05,
   g_fn = default_g_fn,
   batch_size = NULL,
-  verbose = TRUE
+  verbose = TRUE,
+  rho_support = NULL
 ) {
   stopifnot(is.numeric(Y0_pre))
   T0 <- length(Y0_pre)
@@ -144,9 +176,30 @@ geweke_jdt_full <- function(
   K <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
 
   # 正規化（行ごとに w|W を同時に）
-  normed <- normalize_joint_wW(W_raw, w_raw)
-  W_use <- normed$W_new
-  w_use <- normed$w_new
+  W_use <- row_normalize(W)
+  w_use <- as.numeric(w)
+  wsum <- sum(w_use)
+  if (is.finite(wsum) && wsum > 1e-12) {
+    w_use <- w_use / wsum
+  }
+
+  spectral_bound <- function(W) {
+    ev <- eigen(W, symmetric = FALSE, only.values = TRUE)$values
+    r <- max(Mod(ev))
+    if (!is.finite(r) || r <= 0) {
+      return(0.95)
+    } # フォールバック
+    0.95 / r
+  }
+  if (is.null(rho_support)) {
+    bnd <- spectral_bound(W_use)
+    rho_lo <- -bnd
+    rho_hi <- bnd
+  } else {
+    stopifnot(length(rho_support) == 2L, rho_support[1] < rho_support[2])
+    rho_lo <- as.numeric(rho_support[1])
+    rho_hi <- as.numeric(rho_support[2])
+  }
 
   # ---------- MC (iid) side ----------
   if (verbose) {
@@ -230,7 +283,9 @@ geweke_jdt_full <- function(
       state_in = state,
       a0 = a0,
       b0 = b0,
-      step_rho = step_rho
+      step_rho = step_rho,
+      rho_lo = rho_lo,
+      rho_hi = rho_hi
     )
   }
 
@@ -265,7 +320,9 @@ geweke_jdt_full <- function(
       state_in = state,
       a0 = a0,
       b0 = b0,
-      step_rho = step_rho
+      step_rho = step_rho,
+      rho_lo = rho_lo,
+      rho_hi = rho_hi
     )
     g_mcmc_mat[m, ] <- g_fn(state, Yc_draw, Y0_pre, W_use, w_use)
   }
@@ -307,35 +364,4 @@ geweke_jdt_full <- function(
     summary = summary,
     details = list(M1 = M1, M2 = M2, burn_in = burn_in, batch_size = batch_size)
   )
-}
-
-# --- 最小実行例（合格確認の段階1: K=0, p=0, W=0, alpha=0） ---
-#' @keywords internal
-example_jdt_minimal <- function() {
-  set.seed(1)
-  T0 <- 10
-  N <- 5
-  W <- matrix(0, N, N)
-  w <- rep(0, N)
-  alpha_hat_scaled <- rep(0, N)
-  Y0_pre <- rnorm(T0)
-
-  out <- geweke_jdt_full(
-    Y0_pre = Y0_pre,
-    Yc_pre_like_dims = c(T0, N),
-    W_raw = W,
-    w_raw = w,
-    alpha_hat_scaled = alpha_hat_scaled,
-    Xc_pre = NULL,
-    p = 0L,
-    M1 = 2000L,
-    M2 = 2000L,
-    burn_in = 500L,
-    a0 = 3,
-    b0 = 2,
-    step_rho = 0.05,
-    g_fn = default_g_fn,
-    verbose = TRUE
-  )
-  out$summary
 }

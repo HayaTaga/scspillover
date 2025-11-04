@@ -18,19 +18,38 @@ knitr::opts_chunk$set(
 ```
 
 ```{r}
+rm(list = ls())
 # library(scspill)
-load("./data/sudan_secession_latest.rda")
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(knitr)
+library(kableExtra)
 
-panel_df <- sudan_secession_latest$panel
-w_vec <- sudan_secession_latest$w
-W_mat <- sudan_secession_latest$W
+source("R/01_utils.R")
+source("R/02_utils_data_prep.R")
+source("R/03_utils_plot.R")
+source("R/04_utils_diagnostics.R")
+source("R/10_sc_spillover.R")
+source("R/21_mcmc_alpha.R")
+source("R/22_mcmc_sar.R")
+source("R/40_geweke_latest.R")
+source("R/41_robustness_check.R")
+source("R/50_plots_paper.R")
+Rcpp::sourceCpp("src/20_mcmc.cpp")
+Rcpp::sourceCpp("src/40_geweke_latest.cpp")
+
+
+load("./data/sudan_secession_up.rda")
+
+panel_df <- sudan_secession_up$panel
+w_vec <- sudan_secession_up$w
+W_mat <- sudan_secession_up$W
 panel_df <- panel_df %>%
   mutate(
     treatment = ifelse((country == "Sudan") & (year >= 2011), 1, 0)
-  ) %>%
-    filter(
-      year <= 2015
-    )
+  )
 
 ```
 
@@ -44,13 +63,13 @@ fit <- sc_spillover(
   w = w,
   W = W,
   treatment_dummy = "treatment",
-  y = colnames(panel_df)[11],
-  X = colnames(panel_df)[4:10],
+  y = colnames(panel_df)[4],
+  X = colnames(panel_df)[c(5:10)],
   p_factors = 1,
-  M = 50000,
-  burn = 25000,
+  M = 100000,
+  burn = 50000,
   seed = 20251022,
-  step_rho = 0.05,
+  step_rho = 0.0025,
   unit_col = "country",
   time_col = "year"
 )
@@ -60,9 +79,8 @@ fit <- sc_spillover(
 ```{r fig3b}
 plot(fit, time_col = "year")
 plot(fit, type = "spill_top", top_n = 8, time_col = "year")
-```
+plot(fit, type = "rho")
 
-```{r fig4}
 p <- diagnostics.scspill(
   fit,
   which_alpha = NULL,
@@ -71,4 +89,524 @@ p <- diagnostics.scspill(
   top_n_beta = 6
 )
 print(p)
+
+ggsave(
+  filename = "inst/figures/fig_sudan_diag.pdf",
+  plot = p,
+  width = 6.8,
+  height = 4.5,
+  dpi = 300,
+)
+
+diag_tab <- attr(p, "summary")
+diag_tab[order(diag_tab$ess, decreasing = TRUE), ]
+
+write.csv(diag_tab, "inst/tables/sudan_diag_table.csv", row.names = FALSE)
+
+digits_vec <- rep(3L, ncol(diag_tab))
+names(digits_vec) <- names(diag_tab)
+digits_vec[c("n")] <- 0L
+digits_vec[c(
+  "mean",
+  "sd",
+  "q025",
+  "q05",
+  "q50",
+  "q95",
+  "q975",
+  "mcse",
+  "act",
+  "rhat_split",
+  "geweke_z"
+)] <- 4L
+digits_vec <- digits_vec[colnames(diag_tab)]
+
+col_labels <- c(
+  parameter = "Parameter",
+  n = "$M$",
+  mean = "Mean",
+  sd = "SD",
+  q025 = "$q_{0.025}$",
+  q05 = "$q_{0.05}$",
+  q50 = "$q_{0.50}$",
+  q95 = "$q_{0.95}$",
+  q975 = "$q_{0.975}$",
+  ess = "ESS",
+  mcse = "MCSE",
+  act = "ACT",
+  rhat_split = "$\\hat{R}_{\\mathrm{split}}$",
+  geweke_z = "Geweke $Z$"
+)
+col_labels <- col_labels[colnames(diag_tab)]
+
+latex_code <- kableExtra::kable(
+  diag_tab,
+  format = "latex",
+  booktabs = TRUE,
+  escape = FALSE, # allow math in labels
+  digits = as.integer(digits_vec),
+  col.names = unname(col_labels),
+  caption = "Posterior summaries and MCMC diagnostics."
+) |>
+  kableExtra::kable_styling(latex_options = c("hold_position"))
+
+cat(latex_code, file = "inst/tables/sudan_diag_table.tex")
+```
+
+```{r}
+p_a <- plot_panel_outcomes(
+  fit = fit,
+  data = panel_df,
+  treated_unit = "Sudan",
+  treatment_dummy = "treatment",
+  y = colnames(panel_df)[4],
+  unit_col = "country",
+  time_col = "year",
+  title = "",
+  x_title = "Year",
+  y_title = colnames(panel_df)[4],
+  year_every = 2, # 2年ごと表示
+  force_perfect_pre = TRUE,
+  skip_year = 2011,
+  save_path = "inst/figures/fig_sudan_panelA.pdf"
+)
+
+p_a
+
+annote_main <- data.frame(
+  time = 2010, # 矢印の付け根のX座標（年）
+  y = -100, # 矢印の付け根のY座標
+  label = "Secession",
+  hjust = 1, # テキストを矢印の左側に配置
+  vjust = 0.5
+)
+
+p_b <- plot_panel_effect(
+  fit = fit,
+  data = panel_df, # ★ SCM計算のために必須
+  treated_unit = "Sudan",
+  treatment_dummy = "treatment",
+  y = colnames(panel_df)[4],
+  unit_col = "country",
+  time_col = "year",
+  vline_at = 2010, # 論文の図の垂直線
+  annotations_df = annote_main,
+  skip_year = 2011
+)
+
+p_b
+
+ggsave(
+  filename = "inst/figures/fig_sudan_panelB.pdf",
+  plot = p_b,
+  width = 6.8,
+  height = 4.5,
+  dpi = 300,
+)
+
+annote_state <- head(names(sort(colMeans(fit$effects$spill))), 3)
+
+annote_spill <- create_spillover_annotations(
+  fit = fit,
+  time_point = 2012, # 注釈を打つ基準年
+  units_to_label = annote_state,
+  # Y座標が近い場合、ここで垂直方向に少しずらす
+  vjust_list = c(0.2, 0.5, 0.8)
+)
+
+p_spill <- plot_spillover_panel(
+  fit = fit,
+  main_title = "Estimates of the Spillover Effects of California Tobacco Tax",
+  vline_at = 2011, # 垂直線
+  annotations_df = annote_spill,
+  skip_year = 2011
+)
+
+p_spill
+
+ggsave(
+  filename = "inst/figures/fig_sudan_panel_spillover.pdf",
+  plot = p_spill,
+  width = 6.8,
+  height = 4.5,
+  dpi = 300,
+)
+```
+
+
+
+```{r fig2}
+# Robustness Check
+
+# Prior Sensitivity
+grid <- data.frame(
+  a0 = c(3, 5, 2),
+  b0 = c(1, 1, 0.5),
+  rho_lo = c(-0.5, -0.3, -0.7),
+  rho_hi = c(0.5, 0.3, 0.7),
+  step_rho = c(0.05, 0.03, 0.07)
+)
+
+Yc_pre_obs <- panel_df %>%
+  filter(
+    (country != "Sudan") & (year < 2011)
+  ) %>%
+  pivot_wider(
+    id_cols = year,
+    names_from = country,
+    values_from = colnames(panel_df)[4]
+  ) %>%
+  select(-year) %>%
+  as.matrix()
+
+Y0_pre <- panel_df %>%
+  filter(
+    (country == "Sudan") & (year < 2011)
+  ) %>%
+  select(colnames(panel_df)[4]) %>%
+  as.matrix()
+
+Xc_pre <- panel_df %>%
+  filter(
+    (country != "Sudan") & (year < 2011)
+  ) %>%
+  pivot_wider(
+    id_cols = year,
+    names_from = country,
+    values_from = colnames(panel_df)[4]
+  ) %>%
+  select(-year) %>%
+  as.matrix()
+
+dim(Xc_pre) <- c(nrow(Xc_pre), ncol(Xc_pre), 1)
+
+alpha_hat <- colMeans(fit$alpha_draws)
+sds_Yc <- apply(Yc_pre_obs, 2, sd)
+sds_Yc[!is.finite(sds_Yc) | sds_Yc < 1e-8] <- 1
+alpha_hat_scaled <- alpha_hat / sds_Yc
+
+sens <- prior_sensitivity(
+  Yc_obs = Yc_pre_obs,
+  W_raw = W,
+  w_raw = w,
+  alpha_hat_scaled = alpha_hat_scaled,
+  Xc_pre = Xc_pre,
+  p = 0L,
+  grid = grid,
+  M_burn = 50000L,
+  M_keep = 100000L
+)
+
+sens$theta_table
+
+sens$theta_table %>%
+  kable(
+    "latex",
+    booktabs = TRUE,
+    caption = "Sensitivity Results",
+    label = "tab:sens",
+    escape = FALSE
+  ) %>%
+  kable_styling(latex_options = c("hold_position")) %>%
+  save_kable("inst/tables/sudan_sens_table.tex")
+
+write.csv(
+  sens$theta_table,
+  "inst/tables/sudan_sensitivity.csv",
+  row.names = FALSE
+)
+```
+
+
+```{r}
+# Prior Predictive
+
+create_ppa_table <- function(ppc_results) {
+  sim_stats <- ppc_results$stat
+
+  obs_stats_vec <- as.numeric(ppc_results$observed)
+  obs_names <- names(ppc_results$observed)
+
+  if (is.null(obs_names)) {
+    obs_names <- colnames(sim_stats)
+  }
+
+  p_values <- vapply(
+    seq_along(obs_names),
+    function(i) {
+      stat_name <- obs_names[i]
+      sim_col <- sim_stats[[stat_name]]
+      obs_val <- obs_stats_vec[i]
+
+      sim_col_finite <- sim_col[is.finite(sim_col)]
+      if (length(sim_col_finite) == 0 || !is.finite(obs_val)) {
+        return(NA_real_)
+      }
+
+      mean(sim_col_finite <= obs_val)
+    },
+    numeric(1)
+  )
+
+  summary_table <- data.frame(
+    Statistic = obs_names,
+    Observed_Value_h_y_obs = obs_stats_vec,
+    P_Value_P_h_y_obs = p_values,
+    row.names = NULL
+  )
+
+  return(summary_table)
+}
+
+ppc <- prior_predictive(
+  Y0_pre = Y0_pre,
+  Yc_obs = Yc_pre_obs,
+  W_raw = W,
+  w_raw = w,
+  alpha_hat_scaled = alpha_hat_scaled,
+  Xc_pre = Xc_pre,
+  p = 0L,
+  a0 = 1,
+  b0 = 1,
+  rho_support = c(-0.9, 0.9),
+  R = 200000
+)
+
+stat_names <- c(
+  "yc_mean",
+  "log_yc_var",
+  "spatial_quadratic",
+  "corr_y0_wyc",
+  "ac1",
+  "ac2",
+  "pve_pc1",
+  "avg_skewness",
+  "avg_kurtosis"
+)
+
+
+sim_long <- ppc$stat %>%
+  as.data.frame() %>%
+  pivot_longer(
+    cols = all_of(stat_names),
+    names_to = "statistic",
+    values_to = "simulated_value"
+  )
+
+obs_long <- ppc$observed %>%
+  t() %>%
+  as.data.frame() %>%
+  pivot_longer(
+    cols = all_of(stat_names),
+    names_to = "statistic",
+    values_to = "observed_value"
+  )
+
+# --- 2. ggplot オブジェクトの作成 ---
+
+# 'scales = "free_x"' が重要。これにより各プロットのX軸が独立します
+gg <- ggplot(sim_long, aes(x = simulated_value)) +
+  # 灰色のヒストグラム (事前予測分布)
+  geom_histogram(
+    bins = 40, # ビンの数を調整
+    fill = "grey90",
+    color = "white",
+    alpha = 0.8
+  ) +
+
+  # 赤色の縦線 (観測値)
+  # obs_long を geom_vline の data として指定
+  geom_vline(
+    data = obs_long,
+    aes(xintercept = observed_value),
+    color = "red",
+    linewidth = 1.0 # 線の太さを調整
+  ) +
+
+  # 統計量ごとに 3x3 のグリッドでファセット化
+  facet_wrap(
+    ~statistic,
+    scales = "free", # X軸もY軸も統計量ごとにスケールを自動調整
+    ncol = 3 # 3列で表示
+  ) +
+
+  # 論文用のテーマ
+  theme_minimal(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    strip.text = element_text(face = "bold") # 各パネルのタイトル (e.g., "yc_mean")
+  ) +
+  labs(
+    title = "Prior Predictive Analysis (Sudan)",
+    x = "Statistic Value",
+    y = "Frequency"
+  )
+print(gg)
+
+ggsave(
+  filename = "inst/figures/fig_sudan_prior_predictive.pdf",
+  plot = gg,
+  width = 6.8,
+  height = 4.5,
+  dpi = 300,
+)
+
+ppc_table <- create_ppa_table(ppc)
+print(ppc_table)
+
+write.csv(
+  ppc_table,
+  "inst/tables/sudan_ppa_summary_table.csv",
+  row.names = FALSE
+)
+
+latex_col_names <- c(
+  "Statistic $h(y)$",
+  "Observed $h(y^o)$",
+  "$P(h \\le h(y^o) | A)$"
+)
+
+# Create the table
+ppa_kable_object <- ppc_table %>%
+  # Round all numeric columns to 3 decimal places for a clean look
+  mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
+
+  kable(
+    "latex",
+    booktabs = TRUE,
+    caption = "Prior Predictive Analysis Summary", # Updated caption
+    label = "tab:ppa_summary", # Updated label
+    escape = FALSE, # IMPORTANT: Renders LaTeX in col.names
+    col.names = latex_col_names, # Use LaTeX column names
+    align = "lrr" # Align columns (Left, Right, Right)
+  ) %>%
+  kable_styling(latex_options = c("hold_position"))
+
+# Save the table to a .tex file
+save_kable(ppa_kable_object, "inst/tables/sudan_ppa_summary_table.tex")
+
+# (Optional) Print the LaTeX code to the console to check
+print(ppa_kable_object)
+
+```
+
+
+
+```{r}
+# ---- packages ----
+library(coda)
+library(mcmcse)
+library(posterior)
+
+# ---- helpers ----
+.check_draws_matrix <- function(x) {
+  # Ensure a numeric matrix with column names
+  stopifnot(is.matrix(x), is.numeric(x))
+  if (is.null(colnames(x))) {
+    colnames(x) <- paste0("param[", seq_len(ncol(x)), "]")
+  }
+  x
+}
+
+# ============================================
+# Single-chain diagnostics
+# Input: matrix (iterations x parameters)
+# Output: data.frame of summaries; attributes contain classical tests
+# ============================================
+mcmc_diagnostics_single <- function(draws_matrix, label = "chain1") {
+  # draws_matrix: numeric matrix (iterations x parameters)
+  Z <- .check_draws_matrix(draws_matrix)
+  mmc <- coda::mcmc(Z)
+
+  # means, sd
+  mu <- colMeans(Z)
+  sds <- apply(Z, 2, sd)
+
+  # ESS (coda) and lag-1 ACF
+  ess_coda <- coda::effectiveSize(mmc)
+  acf_lag1 <- apply(Z, 2, function(z) {
+    acf(z, plot = FALSE, lag.max = 1)$acf[2L]
+  })
+
+  # MCSE (mcmcse, batch means)
+  mcse_mean <- sapply(seq_len(ncol(Z)), function(j) mcmcse::mcse(Z[, j])$se)
+  ess_bm <- sapply(seq_len(ncol(Z)), function(j) mcmcse::ess(Z[, j]))
+
+  # posterior::ess_bulk / ess_tail; Rhat is NA for single chain
+  ds <- posterior::as_draws_matrix(Z)
+  ess_bulk <- posterior::ess_bulk(ds)
+  ess_tail <- posterior::ess_tail(ds)
+  rhat <- posterior::rhat(ds) # single chain -> NA
+
+  # Classical diagnostics (stored in attributes)
+  gz <- try(suppressWarnings(coda::geweke.diag(mmc)$z), silent = TRUE)
+  hd <- try(suppressWarnings(coda::heidel.diag(mmc)), silent = TRUE)
+  rft <- try(suppressWarnings(coda::raftery.diag(mmc)), silent = TRUE)
+
+  out <- data.frame(
+    param = colnames(Z),
+    mean = as.numeric(mu),
+    sd = as.numeric(sds),
+    ess_coda = as.numeric(ess_coda),
+    ess_bulk = as.numeric(ess_bulk),
+    ess_tail = as.numeric(ess_tail),
+    ess_bm = as.numeric(ess_bm),
+    mcse_mean = as.numeric(mcse_mean),
+    acf_lag1 = as.numeric(acf_lag1),
+    rhat = as.numeric(rhat)
+  )
+  attr(out, "gewekeZ") <- gz
+  attr(out, "heidel") <- hd
+  attr(out, "raftery") <- rft
+  attr(out, "label") <- label
+  out
+}
+
+
+# ============================================
+# Optional: quick plots if bayesplot is available
+# Input: draws (matrix) or list of matrices
+# ============================================
+mcmc_quick_plots <- function(draws, params = NULL, max_params = 8) {
+  if (!requireNamespace("bayesplot", quietly = TRUE)) {
+    message("bayesplot not installed; skipping plots.")
+    return(invisible(NULL))
+  }
+  pick_cols <- function(m) {
+    idx <- seq_len(ncol(m))
+    if (!is.null(params)) {
+      idx <- which(colnames(m) %in% params)
+    }
+    idx <- head(idx, max_params)
+    m[, idx, drop = FALSE]
+  }
+
+  if (is.matrix(draws)) {
+    Z <- pick_cols(.check_draws_matrix(draws))
+    bayesplot::mcmc_trace(Z)
+    bayesplot::mcmc_acf(Z)
+  } else if (is.list(draws)) {
+    L <- lapply(draws, function(m) pick_cols(.check_draws_matrix(m)))
+    # to array: iterations x parameters x chains
+    iters <- min(sapply(L, nrow))
+    P <- ncol(L[[1L]])
+    arr <- array(NA_real_, dim = c(iters, P, length(L)))
+    for (c in seq_along(L)) {
+      arr[,, c] <- L[[c]][seq_len(iters), , drop = FALSE]
+    }
+    colnames(arr) <- colnames(L[[1L]])
+    dm <- posterior::as_draws_array(arr)
+    bayesplot::mcmc_trace(dm)
+    bayesplot::mcmc_acf(dm)
+    bayesplot::mcmc_rhat(dm)
+  } else {
+    stop("draws must be a matrix or a list of matrices.")
+  }
+  invisible(NULL)
+}
+
+D <- cbind(fit$alpha_draws, fit$rho_draws)
+diag1 <- mcmc_diagnostics_single(D, label = "posterior_run")
+diag1
 ```

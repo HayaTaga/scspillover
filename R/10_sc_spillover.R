@@ -52,10 +52,12 @@ sc_spillover <- function(
     time_col = time_col
   )
 
-  joint_norm <- normalize_joint_wW(W, w)
-  W_use <- joint_norm$W_new
-  w_use <- joint_norm$w_new
-
+  W_use <- row_normalize(W)
+  w_use <- as.numeric(w)
+  wsum <- sum(w_use)
+  if (is.finite(wsum) && wsum > 1e-12) {
+    w_use <- w_use / wsum
+  }
   Y0_pre <- prep$Y0_pre
   Yc_pre <- prep$Yc_pre
   Y0_post <- prep$Y0_post
@@ -106,8 +108,6 @@ sc_spillover <- function(
     }
   }
 
-  w_l2 <- as.numeric(w_use)
-
   sar <- sar_full_sampler_cpp_step2(
     Yc_pre = Yc_pre,
     alpha_hat_in = alpha_hat,
@@ -116,7 +116,7 @@ sc_spillover <- function(
     N = N,
     K = K,
     p = as.integer(p_factors),
-    w_in = w_l2,
+    w = w_use,
     W = as.matrix(W_use),
     iteration = M,
     burn = burn,
@@ -135,28 +135,35 @@ sc_spillover <- function(
   IN <- diag(N)
 
   cf_one_rho <- function(rho) {
-    Ainv <- solve(IN - rho * (W_use + w_l2 %*% t(alpha_hat)))
+    Ainv <- solve(IN - rho * (W_use + w_use %*% t(alpha_hat)))
     B <- (IN - rho * W_use)
     ycf <- numeric(T1)
     for (t in seq_len(T1)) {
-      tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho * w_l2 * Y0_post[t])
+      tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho * w_use * Y0_post[t])
       ycf[t] <- as.numeric(crossprod(alpha_hat, tmp))
     }
     ycf
   }
 
   spill_one_rho <- function(rho) {
-    M_obs_inv <- solve(IN - rho * (W_use + w_l2 %*% t(alpha_hat)))
+    M_obs_inv <- solve(IN - rho * (W_use + w_use %*% t(alpha_hat)))
     B <- (IN - rho * W_use)
+
+    Yc_pre_cf <- matrix(NA_real_, nrow = T0, ncol = N)
+    for (t in seq_len(T0)) {
+      tmp <- M_obs_inv %*% (B %*% Yc_pre[t, ] - rho * w_use * Y0_pre[t])
+      Yc_pre_cf[t, ] <- as.numeric(tmp)
+    }
+    spill_pre <- Yc_pre - Yc_pre_cf
 
     Yc_post_cf <- matrix(NA_real_, nrow = T1, ncol = N)
     for (t in seq_len(T1)) {
-      tmp <- M_obs_inv %*% (B %*% Yc_post[t, ] - rho * w_l2 * Y0_post[t])
+      tmp <- M_obs_inv %*% (B %*% Yc_post[t, ] - rho * w_use * Y0_post[t])
       Yc_post_cf[t, ] <- as.numeric(tmp)
     }
+    spill_post <- Yc_post - Yc_post_cf
 
-    spill_effect <- Yc_post - Yc_post_cf
-    spill_effect
+    rbind(spill_pre, spill_post)
   }
 
   ycf_point <- cf_one_rho(rho_hat)
@@ -166,10 +173,12 @@ sc_spillover <- function(
   spill_draws_list <- lapply(rho_draws, spill_one_rho)
   spill_draws_array <- array(
     unlist(spill_draws_list),
-    dim = c(T1, N, length(rho_draws))
+    dim = c(T0 + T1, N, length(rho_draws))
   )
+
   spill_mean_matrix <- apply(spill_draws_array, c(1, 2), mean, na.rm = TRUE)
   colnames(spill_mean_matrix) <- colnames(Yc_post)
+  rownames(spill_mean_matrix) <- c(prep$times_pre, prep$times_post)
 
   ate_draws <- vapply(
     rho_draws,
@@ -218,21 +227,46 @@ sc_spillover <- function(
   )
 }
 
-#' @export
-normalize_joint_wW <- function(W, w) {
-  stopifnot(is.matrix(W))
-  stopifnot(length(w) == nrow(W), ncol(W) == nrow(W))
+#' Row-normalize a spatial weights matrix W
+#'
+#' Ensures that the sum of each row is 1.
+#' Sets the diagonal to 0 and handles rows that sum to 0.
+#'
+#' @param W A numeric matrix.
+#' @param tol Tolerance for checking if a row sum is zero.
+#' @param zero_policy How to handle rows that sum to zero (or are close to it).
+#'   "keep" (default): leaves the row as all zeros.
+#'   "uniform": (not implemented here, but common) sets to 1/N.
+#' @return A row-normalized matrix.
+#'
+row_normalize <- function(W, tol = 1e-12, zero_policy = c("keep")) {
+  zero_policy <- match.arg(zero_policy)
 
-  N <- nrow(W)
-  joint <- cbind(w, W)
+  if (!is.matrix(W) || !is.numeric(W)) {
+    stop("W must be a numeric matrix.")
+  }
 
-  rs <- rowSums(joint)
-  rs[rs == 0] <- 1
+  # Ensure diagonal is zero (no self-loops)
+  diag(W) <- 0
 
-  joint_norm <- joint / rs
+  # Calculate row sums
+  rs <- rowSums(W, na.rm = TRUE)
 
-  w_new <- joint_norm[, 1, drop = TRUE]
-  W_new <- joint_norm[, -1, drop = FALSE]
+  # Find rows that are not zero (or very close to it)
+  nz <- rs > tol
 
-  list(W_new = W_new, w_new = w_new)
+  # Normalize non-zero rows
+  if (any(nz)) {
+    W[nz, ] <- W[nz, , drop = FALSE] / rs[nz]
+  }
+
+  # Handle zero-sum rows (if any)
+  if (any(!nz)) {
+    if (zero_policy == "keep") {
+      # Do nothing, leave the row as all zeros
+      W[!nz, ] <- 0 # Ensure it's clean
+    }
+  }
+
+  W
 }

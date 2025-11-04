@@ -74,7 +74,8 @@ scspill_prep_X <- function(
     Yc_post = Yc[(T0 + 1):T, , drop = FALSE],
     Xc_pre = if (is.null(X_3d)) NULL else X_3d[1:T0, , , drop = FALSE],
     Xc_post = if (is.null(X_3d)) NULL else X_3d[(T0 + 1):T, , , drop = FALSE],
-    times = times,
+    times_pre = times[1:T0],
+    times_post = times[(T0 + 1):T],
     units = list(treated = treated_unit, controls = controls)
   )
 }
@@ -183,4 +184,174 @@ robust_solve <- function(
     return(MASS::ginv(A))
   }
   MASS::ginv(A) %*% b
+}
+
+# ================================================
+# Minimal SCM weights via SLSQP (if available)
+#   min_w  || y - X w ||_2^2
+#   s.t.   sum(w) = 1,  w >= 0
+# ================================================
+
+loss_w <- function(w, X, y) {
+  r <- y - as.numeric(X %*% w)
+  sqrt(mean(r * r))
+}
+
+# ---- SLSQP using nloptr (if installed) ----
+.get_w_slsqp <- function(X, y) {
+  if (!requireNamespace("nloptr", quietly = TRUE)) {
+    return(NULL)
+  }
+
+  K <- ncol(X)
+  w0 <- rep(1 / K, K)
+
+  # 等式制約: sum(w) - 1 = 0
+  heq <- function(w) sum(w) - 1
+  # 不等式制約: w >= 0  <=>  -w <= 0
+  hin <- function(w) -w
+
+  # nloptr では等式: eval_g_eq, 不等式: eval_g_ineq（<=0）
+  eval_f <- function(w) list(objective = loss_w(w, X, y), gradient = NULL)
+  eval_g_eq <- function(w) heq(w)
+  eval_g_ineq <- function(w) hin(w)
+
+  # box: 0 <= w <= 1（上限は任意。数値安定目的で 1 に設定）
+  lb <- rep(0, K)
+  ub <- rep(1, K)
+
+  fit <- nloptr::slsqp(
+    x0 = w0,
+    fn = function(w) loss_w(w, X, y),
+    lower = lb,
+    upper = ub,
+    heq = eval_g_eq,
+    hin = eval_g_ineq,
+    control = list(xtol_rel = 1e-10, maxeval = 1000)
+  )
+  as.numeric(fit$par) / sum(fit$par) # 念のため正規化
+}
+
+# ---- Fallback: L-BFGS-B + ペナルティ（base R のみで可）----
+#   目的: MSE + λ*(sum(w)-1)^2、箱: 0<=w<=1
+.get_w_lbfgsb <- function(X, y, lambda = 1e3) {
+  K <- ncol(X)
+  w0 <- rep(1 / K, K)
+  fn <- function(w) {
+    mse <- mean((y - as.numeric(X %*% w))^2)
+    pen <- lambda * (sum(w) - 1)^2
+    mse + pen
+  }
+  opt <- optim(
+    par = w0,
+    fn = fn,
+    method = "L-BFGS-B",
+    lower = rep(0, K),
+    upper = rep(1, K),
+    control = list(factr = 1e7) # ゆるめで十分
+  )
+  w <- pmax(opt$par, 0)
+  if (sum(w) <= 0) {
+    w[] <- 1 / K
+  }
+  w / sum(w)
+}
+
+# ---- Public: get_w (Python 版と同趣旨) ----
+get_w <- function(X, y) {
+  X <- as.matrix(X)
+  y <- as.numeric(y)
+  stopifnot(nrow(X) == length(y))
+  w <- .get_w_slsqp(X, y)
+  if (is.null(w)) {
+    w <- .get_w_lbfgsb(X, y)
+  }
+  w
+}
+
+# ================================================
+# Counterfactual from weights (pre fit → post apply)
+#   ・pre の y0 と Yc で w を推定
+#   ・pre/post の Yc に w を乗じて y_cf を構築
+# ================================================
+scm_counterfactual_light <- function(
+  data,
+  treated_unit,
+  treatment_dummy,
+  y,
+  unit_col,
+  time_col
+) {
+  stopifnot(all(c(treatment_dummy, y, unit_col, time_col) %in% names(data)))
+  df <- data
+  df[[unit_col]] <- as.character(df[[unit_col]])
+  df[[time_col]] <- as.numeric(df[[time_col]])
+
+  # 介入境界（treated の最初の 1 の直前を pre 最終期）
+  dtr <- df[df[[unit_col]] == treated_unit, c(time_col, treatment_dummy, y)]
+  dtr <- dtr[order(dtr[[time_col]]), ]
+  t0_end <- min(dtr[dtr[[treatment_dummy]] == 1, time_col]) - 1
+
+  # グリッド
+  t_all <- sort(unique(df[[time_col]]))
+  pre_t <- t_all[t_all <= t0_end]
+  post_t <- t_all[t_all > t0_end]
+
+  # ワイド化（pre/post）
+  to_wide <- function(times) {
+    units <- sort(unique(df[[unit_col]]))
+    M <- matrix(
+      NA_real_,
+      nrow = length(times),
+      ncol = length(units),
+      dimnames = list(times, units)
+    )
+    for (u in units) {
+      sub <- df[df[[unit_col]] == u & df[[time_col]] %in% times, c(time_col, y)]
+      if (nrow(sub)) M[match(sub[[time_col]], times), u] <- sub[[y]]
+    }
+    M
+  }
+  Y_pre <- to_wide(pre_t)
+  Y_post <- to_wide(post_t)
+
+  # treated / donors
+  y0_pre <- as.numeric(Y_pre[, treated_unit])
+  y0_post <- as.numeric(Y_post[, treated_unit])
+  donors <- setdiff(colnames(Y_pre), treated_unit)
+  Yc_pre <- as.matrix(Y_pre[, donors, drop = FALSE])
+  Yc_post <- as.matrix(Y_post[, donors, drop = FALSE])
+
+  # 欠損のある donor は除外（pre だけ見れば十分）
+  keep <- colSums(is.na(Yc_pre)) == 0
+  donors <- donors[keep]
+  Yc_pre <- Yc_pre[, keep, drop = FALSE]
+  Yc_post <- Yc_post[, keep, drop = FALSE]
+
+  # 重み推定（pre）
+  w <- get_w(X = Yc_pre, y = y0_pre)
+  names(w) <- donors
+
+  # CF 構築
+  ycf_pre <- as.numeric(Yc_pre %*% w)
+  ycf_post <- as.numeric(Yc_post %*% w)
+
+  rbind(
+    data.frame(
+      time = pre_t,
+      y_obs = y0_pre,
+      y_cf = ycf_pre,
+      period = "pre",
+      t_idx = seq_along(pre_t)
+    ),
+    data.frame(
+      time = post_t,
+      y_obs = y0_post,
+      y_cf = ycf_post,
+      period = "post",
+      t_idx = length(pre_t) + seq_along(post_t)
+    )
+  ) -> out
+  attr(out, "weights") <- w
+  out
 }

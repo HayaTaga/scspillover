@@ -190,17 +190,19 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
 
   const int M = std::max(0, iteration - burn);
 
-  // ---------- scale Yc columns by SD ----------
-  arma::mat Yc_orig = Yc_pre; // T0 x N
-  arma::vec sds_Yc(N);
-  arma::mat Yc = Yc_orig;
-  for (int j = 0; j < N; ++j) {
-    double sdj = arma::stddev(Yc_orig.col(j));
-    if (!arma::is_finite(sdj) || sdj < 1e-8) sdj = 1.0;
-    sds_Yc(j) = sdj;
-    Yc.col(j) = Yc_orig.col(j) / sdj;
-  }
-  arma::vec alpha = alpha_hat_in / sds_Yc; // N
+  // // ---------- scale Yc columns by SD ----------
+  // arma::mat Yc_orig = Yc_pre; // T0 x N
+  // arma::vec sds_Yc(N);
+  // arma::mat Yc = Yc_orig;
+  // for (int j = 0; j < N; ++j) {
+  //   double sdj = arma::stddev(Yc_orig.col(j));
+  //   if (!arma::is_finite(sdj) || sdj < 1e-8) sdj = 1.0;
+  //   sds_Yc(j) = sdj;
+  //   Yc.col(j) = Yc_orig.col(j) / sdj;
+  // }
+  // arma::vec alpha = alpha_hat_in / sds_Yc; // N
+  const arma::mat& Yc = Yc_pre;
+  const arma::vec& alpha = alpha_hat_in;
 
   // X accessor
   const bool useX = (K > 0) && Xc_pre_.isNotNull();
@@ -474,7 +476,7 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     _["Lambda"]     = Lambda_draws,
     _["F"]          = F_draws,
     _["acc_rho"]    = acc_rho / std::max(1, M),
-    _["final_log_step_rho"] = log_step_rho,
-    _["sds_Yc"]     = sds_Yc
+    _["final_log_step_rho"] = log_step_rho
+    // _["sds_Yc"]     = sds_Yc
   );
 }

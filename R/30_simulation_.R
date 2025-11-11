@@ -53,14 +53,13 @@ make_w <- function(N, treated = 1L) {
 ) {
   N <- length(alpha_hat)
   IN <- diag(N)
-  w_use <- w
 
-  Ainv <- solve(IN - rho_hat * (w_use %*% t(alpha_hat) + W))
+  Ainv <- solve(IN - rho_hat * (w %*% t(alpha_hat) + W))
   B <- (IN - rho_hat * W)
   T1 <- nrow(Yc_post)
   ycf <- numeric(T1)
   for (t in seq_len(T1)) {
-    tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho_hat * w_use * Y0_post[t])
+    tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho_hat * w * Y0_post[t])
     ycf[t] <- as.numeric(crossprod(alpha_hat, tmp))
   }
   ycf
@@ -82,23 +81,6 @@ if (!requireNamespace("quadprog", quietly = TRUE)) {
   sol <- quadprog::solve.QP(Dmat, dvec, Amat, bvec, meq = 1)
   as.numeric(sol$solution)
 }
-
-# =========================================================
-# Counterfactual under SCSPILL structure (post)
-# =========================================================
-# .scspill_cf_post <- function(Y0_post, Yc_post, W, w, alpha_hat, rho_hat) {
-#   N <- length(alpha_hat)
-#   IN <- diag(N)
-#   Ainv <- solve(IN - rho_hat * (w %*% t(alpha_hat) + W))
-#   B <- (IN - rho_hat * W)
-#   T1 <- nrow(Yc_post)
-#   ycf <- numeric(T1)
-#   for (t in seq_len(T1)) {
-#     tmp <- Ainv %*% (B %*% Yc_post[t, ] - rho_hat * w * Y0_post[t])
-#     ycf[t] <- as.numeric(crossprod(alpha_hat, tmp))
-#   }
-#   ycf
-# }
 
 # =========================================================
 # DGP (指示の4ステップで素直に生成)
@@ -218,6 +200,9 @@ scspill_sim_dgp <- function(
   vec_Xc_pre <- if (K > 0) as.numeric(aperm(X_pre, c(1, 2, 3))) else NULL
   vec_Xc_post <- if (K > 0) as.numeric(aperm(X_post, c(1, 2, 3))) else NULL
 
+  # print(A_pre_inv)
+  # print(A_post_inv)
+
   list(
     data = list(
       Y0_pre = Y0_pre,
@@ -267,7 +252,7 @@ run_one_sim <- function(
     if (is.null(args$W)) {
       grid <- args$grid %||%
         stop("dgp_args: specify `W` or `grid = c(nrow, ncol)`.")
-      args$W <- rook_W(grid[1], grid[2], normalize = TRUE)
+      args$W <- rook_W(grid[1], grid[2], normalize = FALSE)
       args$N <- nrow(args$W)
     } else {
       args$N <- nrow(args$W)
@@ -364,7 +349,7 @@ run_one_sim <- function(
         Yc_post = Yc_post,
         W = W,
         w = w,
-        alpha_hat = alpha_hat_bscm, # Step1 の固定α
+        alpha_hat = alpha_hat_bscm,
         rho_hat = rh
       )
       Y0_post - ycf_m
@@ -386,6 +371,10 @@ run_one_sim <- function(
       te_true <= te_spill_ci[, "upper"]
   )
   cover_pt_spill <- mean(cover_pt_spill_vec)
+  # print(te_true)
+  # print("--------")
+  # print(te_spill_ci)
+  # print("================")
 
   # 2) ATE の事後（各ドローで平均を取り、その分布からCI/被覆）
   ate_spill_draws <- colMeans(te_spill_mat) # 各ドローの ATE
@@ -494,6 +483,11 @@ run_one_sim <- function(
       cover = as.numeric(spill_ci[, 1] <= te_true & te_true <= spill_ci[, 2])
     )
   )
+  # print(te_true)
+  # print(spill_ci)
+  # print("===rho===")
+  # print(stats::quantile(rho_draws_step2, c(0.025, 0.975), names = FALSE))
+  # print("============")
 
   # 返り値に追加
   list(

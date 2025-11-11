@@ -475,7 +475,7 @@ Rcpp::List sar_full_sampler_cpp_step2(const arma::mat& Yc_pre,           // T0 x
     _["beta"]       = beta_draws,
     _["Lambda"]     = Lambda_draws,
     _["F"]          = F_draws,
-    _["acc_rho"]    = acc_rho / std::max(1, M),
+    _["acc_rho"]    = (double)acc_rho / std::max(1.0, (double)M),
     _["final_log_step_rho"] = log_step_rho
     // _["sds_Yc"]     = sds_Yc
   );

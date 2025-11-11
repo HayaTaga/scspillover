@@ -340,22 +340,42 @@ run_one_sim <- function(
   rho_draws_step2 <- as.numeric(sar$rho)
   M_rho <- length(rho_draws_step2)
 
+  S <- min(nrow(alpha_draws_bscm), M_rho)
+  idx_a <- sample(seq_len(nrow(alpha_draws_bscm)), S, replace = (S > nrow(alpha_draws_bscm)))
+  idx_r <- sample(seq_len(M_rho), S, replace = (S > M_rho))
+
   # 全ドローの時点別処置効果（T1 × M_rho）
-  te_spill_mat <- vapply(
-    rho_draws_step2,
-    function(rh) {
-      ycf_m <- .scspill_cf_post(
+  # te_spill_mat <- vapply(
+  #   rho_draws_step2,
+  #   function(rh) {
+  #     ycf_m <- .scspill_cf_post(
+  #       Y0_post = Y0_post,
+  #       Yc_post = Yc_post,
+  #       W = W,
+  #       w = w,
+  #       alpha_hat = alpha_hat_bscm,
+  #       rho_hat = rh
+  #     )
+  #     Y0_post - ycf_m
+  #   },
+  #   FUN.VALUE = numeric(T1)
+  # )
+
+  te_spill_mat <- matrix(NA_real_, nrow = T1, ncol = S)
+
+  for (s in seq_len(S)) {
+    ah <- as.numeric(alpha_draws_bscm[idx_a[s], ])
+    rh <- rho_draws_step2[idx_r[s]]
+    ycf_m <- .scspill_cf_post(
         Y0_post = Y0_post,
         Yc_post = Yc_post,
         W = W,
         w = w,
-        alpha_hat = alpha_hat_bscm,
+        alpha_hat = ah,
         rho_hat = rh
       )
-      Y0_post - ycf_m
-    },
-    FUN.VALUE = numeric(T1)
-  )
+      te_spill_mat[, s] <- (Y0_post - ycf_m)
+  }
 
   # 1) 各時点の事後平均（推定量）と 95% CI、被覆
   te_spill_mean <- rowMeans(te_spill_mat) # 事後平均（時点別推定量）

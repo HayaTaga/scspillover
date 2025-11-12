@@ -239,27 +239,36 @@ if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
 
-for (N in c(64)) {
-  # c(16, 36, 64)
-  for (T0 in c(20)) {
-    # c(20, 50)
-    study <- mc_grid_study(
-      Ns = c(N), # grid size: 4×4 and 6×6
-      T0s = c(T0), # pre-period length
-      rhos = c(-0.8, -0.3, 0.0, 0.3, 0.8), # spatial coefficient c(-0.8, -0.3, 0.0, 0.3, 0.8)
-      T1 = 20, # post-treatment length (20 or 50)
-      sims_per = 1000, # repetitions per scenario
-      K = 1, # number of covariates
-      beta = c(1.0), # true regression slope
-      sigma2 = 0.1, # innovation variance
-      treated_idx = 1:4, # treated units
-      M = 5000, # MCMC iterations
-      burn = 1000, # burn-in
-      step_rho = 0.05 # MH step size
-    )
-    output_path <- paste0(output_dir, "/mc_study_N=", N, "T0=", T0, ".csv")
-    write.csv(study$summary, output_path, row.names = FALSE)
-    rm(study)
+for (N in c(16, 36, 64)) {
+  for (T0 in c(20, 50)) {
+    for (T1 in c(20, 50)) {
+      study <- mc_grid_study(
+        Ns = c(N), # grid size: 4×4 and 6×6
+        T0s = c(T0), # pre-period length
+        rhos = c(-0.8, -0.3, 0.0, 0.3, 0.8), # spatial coefficient c(-0.8, -0.3, 0.0, 0.3, 0.8)
+        T1 = T1, # post-treatment length (20 or 50)
+        sims_per = 10, # repetitions per scenario. It takes too long time if set 1000.
+        K = 1, # number of covariates
+        beta = c(1.0), # true regression slope
+        sigma2 = 0.1, # innovation variance
+        treated_idx = 1:4, # treated units
+        M = 2500, # MCMC iterations
+        burn = 500, # burn-in
+        step_rho = 0.05 # MH step size
+      )
+      output_path <- paste0(
+        output_dir,
+        "/mc_study_N=",
+        N,
+        "T0=",
+        T0,
+        "T1=",
+        T1,
+        ".csv"
+      )
+      write.csv(study$summary, output_path, row.names = FALSE)
+      rm(study)
+    }
   }
 }
 
@@ -411,9 +420,20 @@ base_dir <- "inst/tables/mc_result"
 study <- data.frame()
 for (N in c(16, 36, 64)) {
   for (T0 in c(20, 50)) {
-    output_path <- paste0(output_dir, "/mc_study_N=", N, "T0=", T0, ".csv")
-    df_tmp <- read.csv(output_path)
-    study <- study %>% rbind(df_tmp)
+    for (T1 in c(20, 50)) {
+      output_path <- paste0(
+        output_dir,
+        "/mc_study_N=",
+        N,
+        "T0=",
+        T0,
+        "T1=",
+        T1,
+        ".csv"
+      )
+      df_tmp <- read.csv(output_path)
+      study <- study %>% rbind(df_tmp)
+    }
   }
 }
 

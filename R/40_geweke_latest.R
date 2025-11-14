@@ -154,8 +154,8 @@ var_mcmc_batchmeans <- function(x, b = NULL) {
 geweke_jdt_full <- function(
   Y0_pre,
   Yc_pre_like_dims, # c(T0, N)
-  W_raw,
-  w_raw,
+  W,
+  w,
   alpha_hat_scaled, # N
   Xc_pre = NULL, # T0 x N x K array or NULL
   p = 0L,

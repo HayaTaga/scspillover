@@ -52,21 +52,21 @@ panel_df <- panel_df %>%
     treatment = ifelse((state == "California") & (year >= 1988), 1, 0)
   )
 
-w <- as.matrix(w_vec[, 2])
-W <- as.matrix(W_mat[, -1])
+w <- as.matrix(w_vec)
+W <- as.matrix(W_mat)
 fit <- sc_spillover(
   data = panel_df,
   treated_unit = "California",
   w = w,
   W = W,
   treatment_dummy = "treatment",
-  y = colnames(panel_df)[3],
-  X = colnames(panel_df)[4],
+  y = colnames(panel_df)[4],
+  X = c(colnames(panel_df)[5]),
   p_factors = 1,
-  M = 20000,
-  burn = 10000,
+  M = 100000,
+  burn = 50000,
   seed = 20251022,
-  step_rho = 0.005,
+  step_rho = 0.01,
   unit_col = "state",
   time_col = "year"
 )
@@ -114,8 +114,8 @@ digits_vec[c(
   "q975",
   "mcse",
   "act",
-  "rhat_split",
-  "geweke_z"
+  "rhat\\_split",
+  "geweke_\\z"
 )] <- 4L
 digits_vec <- digits_vec[colnames(diag_tab)]
 
@@ -166,7 +166,7 @@ p_a <- plot_panel_outcomes(
   data = panel_df,
   treated_unit = "California",
   treatment_dummy = "treatment",
-  y = colnames(panel_df)[3],
+  y = colnames(panel_df)[4],
   unit_col = "state",
   time_col = "year",
   title = "",
@@ -318,7 +318,6 @@ write.csv(
 
 ```{r}
 # Prior Predictive
-
 create_ppa_table <- function(ppc_results) {
   sim_stats <- ppc_results$stat
 
@@ -371,15 +370,15 @@ ppc <- prior_predictive(
 )
 
 stat_names <- c(
-  "yc_mean",
-  "log_yc_var",
+  "yc\\_mean",
+  "log\\_yc\\_var",
   "spatial_quadratic",
-  "corr_y0_wyc",
+  "corr\\_y0\\_wyc",
   "ac1",
   "ac2",
-  "pve_pc1",
-  "avg_skewness",
-  "avg_kurtosis"
+  "pve\\_pc1",
+  "avg\\_skewness",
+  "avg\\_kurtosis"
 )
 
 

@@ -179,7 +179,7 @@ prior_sensitivity <- function(
 ) {
   # Validate grid
   stopifnot(is.data.frame(grid))
-  req <- c("a0", "b0", "rho_lo", "rho_hi", "step_rho")
+  req <- c("a0", "b0", "rho\\_lo", "rho\\_hi", "step\\_rho")
   stopifnot(all(req %in% names(grid)))
 
   W_use <- row_normalize(W)
@@ -457,15 +457,15 @@ prior_predictive <- function(
 
   stat_mat <- matrix(NA_real_, R, 9)
   colnames(stat_mat) <- c(
-    "yc_mean",
-    "log_yc_var",
-    "spatial_quadratic",
-    "corr_y0_wyc",
+    "yc\\_mean",
+    "log\\_yc\\_var",
+    "spatial\\_quadratic",
+    "corr\\_y0\\_wyc",
     "ac1",
     "ac2",
-    "pve_pc1",
-    "avg_skewness",
-    "avg_kurtosis"
+    "pve\\_pc1",
+    "avg\\_skewness",
+    "avg\\_kurtosis"
   )
 
   for (r in seq_len(R)) {

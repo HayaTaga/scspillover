@@ -53,8 +53,8 @@ for (i in 1:N) {
 w_raw <- rep(0, N)
 w_raw[1] <- 1
 
-W_use <- row_normalize(W)
-w_use <- as.numeric(w)
+W_use <- row_normalize(W_raw)
+w_use <- as.numeric(w_raw)
 wsum <- sum(w_use)
 if (is.finite(wsum) && wsum > 1e-12) {
   w_use <- w_use / wsum
@@ -151,8 +151,8 @@ burn_in <- 2000000L
 out <- geweke_jdt_full(
   Y0_pre = Y0_pre,
   Yc_pre_like_dims = c(T0, N),
-  W_raw = W_use,
-  w_raw = w_use,
+  W = W_use,
+  w = w_use,
   alpha_hat_scaled = alpha_hat_scaled,
   Xc_pre = Xc_pre,
   p = p,
@@ -189,8 +189,8 @@ thin_app <- 5L
 out_app_thin <- geweke_jdt_full(
   Y0_pre = Y0_pre,
   Yc_pre_like_dims = c(T0, N),
-  W_raw = W_use,
-  w_raw = w_use,
+  W = W_use,
+  w = w_use,
   alpha_hat_scaled = alpha_hat_scaled,
   Xc_pre = Xc_pre,
   p = p,
@@ -220,8 +220,8 @@ g_fn_custom <- function(theta, Y, W, w, Y0_pre) {
 out_app_custom <- geweke_jdt_full(
   Y0_pre = Y0_pre,
   Yc_pre_like_dims = c(T0, N),
-  W_raw = W_use,
-  w_raw = w_use,
+  W = W_use,
+  w = w_use,
   alpha_hat_scaled = alpha_hat_scaled,
   Xc_pre = Xc_pre,
   p = p,

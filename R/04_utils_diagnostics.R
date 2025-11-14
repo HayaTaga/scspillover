@@ -156,10 +156,6 @@ diagnostics.scspill <- function(
   # ----- alpha (all by default) -----
   if (!is.null(object$alpha_draws)) {
     unit_names <- .get_units_control(object, ncol(object$alpha_draws))
-    # 既定は "all"
-    if (is.null(which_alpha)) {
-      which_alpha <- "all"
-    }
     if (
       is.character(which_alpha) &&
         length(which_alpha) == 1L &&
@@ -198,8 +194,8 @@ diagnostics.scspill <- function(
   }
 
   # ----- sigma2 / tau2 -----
-  if (!is.null(object$sar) && !is.null(object$sar$sigma2_draws)) {
-    vals <- as.numeric(object$sar$sigma2_draws)
+  if (!is.null(object$sar) && !is.null(object$sar$sigma2)) {
+    vals <- as.numeric(object$sar$sigma2)
     out_list_df[["sigma2"]] <- data.frame(
       iter = seq_along(vals),
       value = vals,

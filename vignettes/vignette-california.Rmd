@@ -673,7 +673,9 @@ ggplot(df_weights, aes(x = weight, y = state, fill = method)) +
       hjust = 1,
       vjust = 1,
       size = 10
-    )
+    ) +
+      panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
   )
 
 ggsave(

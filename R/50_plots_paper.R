@@ -956,7 +956,7 @@ compute_scm_weights <- function(Y0_pre, Yc_pre) {
   N <- ncol(Yc_pre)
 
   Dmat <- crossprod(Yc_pre)
-  ridge <- 1e-8
+  ridge <- 1e-4
   Dmat <- Dmat + ridge * diag(N)
   dvec <- crossprod(Yc_pre, Y0_pre)
 

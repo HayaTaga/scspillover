@@ -667,7 +667,6 @@ countries <- names(proposed_w)
 
 scm_vec <- compute_scm_weights(Y0_pre, Yc_pre_obs)
 names(scm_vec) <- countries
-scm_vec[names(scm_nonzero)] <- scm_nonzero
 
 df_weights <- tibble(
   country = countries,
@@ -706,7 +705,9 @@ ggplot(df_weights, aes(x = weight, y = country, fill = method)) +
       hjust = 1,
       vjust = 1,
       size = 10
-    )
+    ),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank()
   )
 
 ggsave(

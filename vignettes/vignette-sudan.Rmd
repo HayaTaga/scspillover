@@ -26,6 +26,7 @@ library(ggplot2)
 library(stringr)
 library(knitr)
 library(kableExtra)
+library(ggpattern)
 
 source("R/01_utils.R")
 source("R/02_utils_data_prep.R")
@@ -116,8 +117,8 @@ digits_vec[c(
   "q975",
   "mcse",
   "act",
-  "rhat_split",
-  "geweke_z"
+  "rhat\\_split",
+  "geweke\\_z"
 )] <- 4L
 digits_vec <- digits_vec[colnames(diag_tab)]
 
@@ -146,9 +147,10 @@ latex_code <- kableExtra::kable(
   escape = FALSE, # allow math in labels
   digits = as.integer(digits_vec),
   col.names = unname(col_labels),
-  caption = "Posterior summaries and MCMC diagnostics."
+  caption = "MCMC Posterior Summary and Diagnostics (Sudan Split)",
+  label = "tab:sudan_diag"
 ) |>
-  kableExtra::kable_styling(latex_options = c("hold_position"))
+  kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
 
 cat(latex_code, file = "inst/tables/sudan_diag_table.tex")
 ```
@@ -299,15 +301,17 @@ sens <- prior_sensitivity(
 
 sens$theta_table
 
+colnames(sens$theta_table) <- gsub("_", "\\\\_", colnames(sens$theta_table))
+
 sens$theta_table %>%
   kable(
     "latex",
     booktabs = TRUE,
-    caption = "Sensitivity Results",
-    label = "tab:sens",
+    caption = "Prior Sensitivity Analysis (Sudan Split)",
+    label = "tab:sudan_sens",
     escape = FALSE
   ) %>%
-  kable_styling(latex_options = c("hold_position")) %>%
+  kable_styling(latex_options = c("hold_position", "scale_down")) %>%
   save_kable("inst/tables/sudan_sens_table.tex")
 
 write.csv(
@@ -393,8 +397,10 @@ sim_long <- ppc$stat %>%
     values_to = "simulated_value"
   )
 
-obs_long <- ppc$observed %>%
-  t() %>%
+ppc_observed_tmp <- ppc$observed %>% t()
+colnames(ppc_observed_tmp) <- gsub("_", "\\\\_", colnames(ppc_observed_tmp))
+
+obs_long <- ppc_observed_tmp %>%
   as.data.frame() %>%
   pivot_longer(
     cols = all_of(stat_names),
@@ -453,6 +459,7 @@ ggsave(
 )
 
 ppc_table <- create_ppa_table(ppc)
+
 print(ppc_table)
 
 write.csv(
@@ -468,6 +475,9 @@ latex_col_names <- c(
 )
 
 # Create the table
+
+ppc_table <- ppc_table %>% mutate(Statistic = gsub("_", "\\\\_", Statistic))
+
 ppa_kable_object <- ppc_table %>%
   # Round all numeric columns to 3 decimal places for a clean look
   mutate(across(where(is.numeric), ~ round(.x, 3))) %>%
@@ -475,8 +485,8 @@ ppa_kable_object <- ppc_table %>%
   kable(
     "latex",
     booktabs = TRUE,
-    caption = "Prior Predictive Analysis Summary", # Updated caption
-    label = "tab:ppa_summary", # Updated label
+    caption = "Prior Predictive Analysis Summary Table (Sudan Split)", # Updated caption
+    label = "tab:sudan_ppa", # Updated label
     escape = FALSE, # IMPORTANT: Renders LaTeX in col.names
     col.names = latex_col_names, # Use LaTeX column names
     align = "lrr" # Align columns (Left, Right, Right)
@@ -609,4 +619,99 @@ mcmc_quick_plots <- function(draws, params = NULL, max_params = 8) {
 D <- cbind(fit$alpha_draws, fit$rho_draws)
 diag1 <- mcmc_diagnostics_single(D, label = "posterior_run")
 diag1
+```
+
+
+
+```{r}
+w <- as.numeric(fit$inputs$w)
+country_names <- fit$inputs$units$controls
+
+w_df <- data.frame(
+  country = country_names,
+  weight = w
+)
+
+w_df_filtered <- w_df %>%
+  # filter(weight > 1e-8) %>%
+  arrange(weight)
+
+gg_w_bar <- ggplot(
+  w_df_filtered,
+  aes(
+    x = weight,
+    y = reorder(country, weight)
+  )
+) +
+  geom_col(fill = "gray40", width = 0.7) +
+  labs(
+    x = "Weight",
+    y = "Control country"
+  ) +
+  theme_minimal() +
+  xlim(0.0, NA)
+
+print(gg_w_bar)
+
+ggsave(
+  "inst/figures/fig_sudan_trade.pdf",
+  height = 8,
+  width = 6
+)
+```
+
+```{r}
+
+proposed_w <- fit$alpha_hat
+countries <- names(proposed_w)
+
+scm_vec <- compute_scm_weights(Y0_pre, Yc_pre_obs)
+names(scm_vec) <- countries
+scm_vec[names(scm_nonzero)] <- scm_nonzero
+
+df_weights <- tibble(
+  country = countries,
+  Proposed = as.numeric(proposed_w[countries]),
+  SCM = as.numeric(scm_vec[countries])
+) %>%
+  pivot_longer(
+    cols = c(Proposed, SCM),
+    names_to = "method",
+    values_to = "weight"
+  ) %>%
+  mutate(
+    country = factor(country, levels = sort(unique(country)))
+  )
+
+ggplot(df_weights, aes(x = weight, y = country, fill = method)) +
+  geom_col_pattern(
+    aes(pattern = method), # パターンだけを method に割り当て
+    position = position_dodge(width = 0.7),
+    colour = NA,
+    pattern_fill = "black",
+    pattern_colour = NA,
+    pattern_angle = 30,
+    pattern_density = 0.1,
+    pattern_spacing = 0.01
+  ) +
+  scale_pattern_manual(
+    values = c("SCM" = "none", "Proposed" = "stripe")
+  ) +
+  coord_flip() +
+  labs(x = NULL, y = "Country", fill = "method") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 90,
+      hjust = 1,
+      vjust = 1,
+      size = 10
+    )
+  )
+
+ggsave(
+  "inst/figures/fig_sudan_weight.pdf",
+  height = 5.5,
+  width = 11
+)
 ```

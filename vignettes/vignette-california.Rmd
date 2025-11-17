@@ -26,6 +26,7 @@ library(ggplot2)
 library(stringr)
 library(knitr)
 library(kableExtra)
+library(ggpattern)
 
 source("R/01_utils.R")
 source("R/02_utils_data_prep.R")
@@ -52,16 +53,16 @@ panel_df <- panel_df %>%
     treatment = ifelse((state == "California") & (year >= 1988), 1, 0)
   )
 
-w <- as.matrix(w_vec)
-W <- as.matrix(W_mat)
+w <- as.matrix(w_vec[, 2])
+W <- as.matrix(W_mat[, -1])
 fit <- sc_spillover(
   data = panel_df,
   treated_unit = "California",
   w = w,
   W = W,
   treatment_dummy = "treatment",
-  y = colnames(panel_df)[4],
-  X = c(colnames(panel_df)[5]),
+  y = colnames(panel_df)[3],
+  X = c(colnames(panel_df)[4]),
   p_factors = 1,
   M = 100000,
   burn = 50000,
@@ -144,9 +145,10 @@ latex_code <- kableExtra::kable(
   escape = FALSE, # allow math in labels
   digits = as.integer(digits_vec),
   col.names = unname(col_labels),
-  caption = "Posterior summaries and MCMC diagnostics."
+  caption = "MCMC Posterior Summary and Diagnostics (California)",
+  label = "tab:ca_diag"
 ) |>
-  kableExtra::kable_styling(latex_options = c("hold_position"))
+  kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
 
 cat(latex_code, file = "inst/tables/ca_diag_table.tex")
 ```
@@ -205,11 +207,18 @@ annote_state <- head(names(sort(colMeans(fit$effects$spill))), 3)
 
 annote_spill <- create_spillover_annotations(
   fit = fit,
-  time_point = 1993, # 注釈を打つ基準年
+  time_point = 1993,
   units_to_label = annote_state,
-  # Y座標が近い場合、ここで垂直方向に少しずらす
-  vjust_list = c(0.2, 0.5, 0.8)
+  vjust_list = c(0.5, 0.8, 1.0)
 )
+
+annote_spill$label[1] <- paste(
+  annote_spill$label[1],
+  "&",
+  annote_spill$label[3]
+)
+annote_spill$y[1] <- mean(annote_spill$y[c(1, 3)])
+annote_spill <- annote_spill[-3, ]
 
 p_spill <- plot_spillover_panel(
   fit = fit,
@@ -295,17 +304,19 @@ sens <- prior_sensitivity(
   M_keep = 100000L
 )
 
-sens$theta_table # 設定別の事後要約
+sens$theta_table
+
+colnames(sens$theta_table) <- gsub("_", "\\\\_", colnames(sens$theta_table))
 
 sens$theta_table %>%
   kable(
     "latex",
     booktabs = TRUE,
-    caption = "Sensitivity Results",
-    label = "tab:sens",
+    caption = "Prior Sensitivity Analysis (California)",
+    label = "tab:ca_sens",
     escape = FALSE
   ) %>%
-  kable_styling(latex_options = c("hold_position")) %>%
+  kable_styling(latex_options = c("hold_position", "scale_down")) %>%
   save_kable("inst/tables/ca_sens_table.tex")
 
 write.csv(
@@ -372,7 +383,7 @@ ppc <- prior_predictive(
 stat_names <- c(
   "yc\\_mean",
   "log\\_yc\\_var",
-  "spatial_quadratic",
+  "spatial\\_quadratic",
   "corr\\_y0\\_wyc",
   "ac1",
   "ac2",
@@ -390,8 +401,10 @@ sim_long <- ppc$stat %>%
     values_to = "simulated_value"
   )
 
-obs_long <- ppc$observed %>%
-  t() %>%
+ppc_observed_tmp <- ppc$observed %>% t()
+colnames(ppc_observed_tmp) <- gsub("_", "\\\\_", colnames(ppc_observed_tmp))
+
+obs_long <- ppc_observed_tmp %>%
   as.data.frame() %>%
   pivot_longer(
     cols = all_of(stat_names),
@@ -439,13 +452,14 @@ gg <- ggplot(sim_long, aes(x = simulated_value)) +
     x = "Statistic Value",
     y = "Frequency"
   )
+
 print(gg)
 
 ggsave(
   filename = "inst/figures/fig_ca_prior_predictive.pdf",
   plot = gg,
-  width = 6.8,
-  height = 4.5,
+  width = 7.0,
+  height = 4.0,
   dpi = 300,
 )
 
@@ -460,6 +474,8 @@ latex_col_names <- c(
   "$P(h \\le h(y^o) | A)$"
 )
 
+ppc_table <- ppc_table %>% mutate(Statistic = gsub("_", "\\\\_", Statistic))
+
 # Create the table
 ppa_kable_object <- ppc_table %>%
   # Round all numeric columns to 3 decimal places for a clean look
@@ -468,8 +484,8 @@ ppa_kable_object <- ppc_table %>%
   kable(
     "latex",
     booktabs = TRUE,
-    caption = "Prior Predictive Analysis Summary", # Updated caption
-    label = "tab:ppa_summary", # Updated label
+    caption = "Prior Predictive Analysis Summary Table (California)", # Updated caption
+    label = "tab:ca_ppa", # Updated label
     escape = FALSE, # IMPORTANT: Renders LaTeX in col.names
     col.names = latex_col_names, # Use LaTeX column names
     align = "lrr" # Align columns (Left, Right, Right)
@@ -601,4 +617,68 @@ mcmc_quick_plots <- function(draws, params = NULL, max_params = 8) {
 D <- cbind(fit$alpha_draws, fit$rho_draws)
 diag1 <- mcmc_diagnostics_single(D, label = "posterior_run")
 diag1
+```
+
+
+```{r}
+scm_nonzero <- c(
+  # cited from Abadie et al (2010)
+  "Colorado" = 0.164,
+  "Connecticut" = 0.069,
+  "Montana" = 0.199,
+  "Nevada" = 0.234,
+  "Utah" = 0.334
+)
+proposed_w <- fit$alpha_hat
+states <- names(proposed_w)
+
+scm_vec <- rep(0, length(states))
+names(scm_vec) <- states
+scm_vec[names(scm_nonzero)] <- scm_nonzero
+
+df_weights <- tibble(
+  state = states,
+  Proposed = as.numeric(proposed_w[states]),
+  SCM = as.numeric(scm_vec[states])
+) %>%
+  pivot_longer(
+    cols = c(Proposed, SCM),
+    names_to = "method",
+    values_to = "weight"
+  ) %>%
+  mutate(
+    state = factor(state, levels = sort(unique(state)))
+  )
+
+ggplot(df_weights, aes(x = weight, y = state, fill = method)) +
+  geom_col_pattern(
+    aes(pattern = method), # パターンだけを method に割り当て
+    position = position_dodge(width = 0.7),
+    colour = NA,
+    pattern_fill = "black",
+    pattern_colour = NA,
+    pattern_angle = 30,
+    pattern_density = 0.1,
+    pattern_spacing = 0.01
+  ) +
+  scale_pattern_manual(
+    values = c("SCM" = "none", "Proposed" = "stripe")
+  ) +
+  coord_flip() +
+  labs(x = NULL, y = "State", fill = "method") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(
+      angle = 90,
+      hjust = 1,
+      vjust = 1,
+      size = 10
+    )
+  )
+
+ggsave(
+  "inst/figures/fig_ca_weight.pdf",
+  height = 5.5,
+  width = 11
+)
 ```

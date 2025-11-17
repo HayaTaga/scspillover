@@ -219,7 +219,7 @@ diagnostics.scspill <- function(
     K <- ncol(beta_draws)
     beta_names <- colnames(beta_draws)
     if (is.null(beta_names)) {
-      beta_names <- paste0("beta_", seq_len(K))
+      beta_names <- paste0("beta\\_", seq_len(K))
     }
 
     if (is.null(which_beta)) {

@@ -245,9 +245,9 @@ for (N in c(16, 36, 64)) {
       study <- mc_grid_study(
         Ns = c(N), # grid size: 4×4 and 6×6
         T0s = c(T0), # pre-period length
-        rhos = c(-0.8, -0.3, 0.0, 0.3, 0.8), # spatial coefficient c(-0.8, -0.3, 0.0, 0.3, 0.8)
+        rhos = c(-0.8, -0.3, -0.1, 0.0, 0.1, 0.3, 0.8), # spatial coefficient c(-0.8, -0.3, -0.1, 0.0, 0.1, 0.3, 0.8)
         T1 = T1, # post-treatment length (20 or 50)
-        sims_per = 10, # repetitions per scenario. It takes too long time if set 1000.
+        sims_per = 1000, # repetitions per scenario. It takes too long time if set 1000.
         K = 1, # number of covariates
         beta = c(1.0), # true regression slope
         sigma2 = 0.1, # innovation variance
@@ -276,188 +276,270 @@ for (N in c(16, 36, 64)) {
 
 The output table contains, for each scenario and estimation method:
 
-- `bias_point`: Bias of the point estimate
-- `rmse_point`: Root mean squared error
-- `cover95_point`: Coverage of the nominal 95% interval
+- `bias`: Bias of the point estimate
+- `rmse`: Root mean squared error
+- `cover95`: Coverage of the nominal 95% interval
 
-# Bias and RMSE Plots
 
-```{r plot-bias-rmse, fig.width=7, fig.height=5}
-# 論文体裁のパネル表を生成（LaTeX向け）
-# 表示名を統一（SCSPILL -> Proposed）し、順序を固定
-normalize_methods <- function(df) {
-  df %>%
+
+
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(stringr)
+library(readr)
+library(glue)
+
+## ------------------------------------------------------------
+## 1. mc_study_*.csv を読み込んで一つの long データにする
+## ------------------------------------------------------------
+
+read_mc_results <- function(dir = "inst/tables/mc_result") {
+  files <- list.files(
+    dir,
+    pattern = "^mc_study_N=\\d+T0=\\d+T1=\\d+\\.csv$",
+    full.names = TRUE
+  )
+
+  meta <- tibble(file = files) %>%
     mutate(
-      method = recode(method, SCSPILL = "Proposed"),
-      method = factor(method, levels = c("Proposed", "SCM", "BSCM")),
-      N = as.integer(N)
-    )
-}
-
-# 欠け組を安全に補完（NA 埋め）
-complete_grid <- function(df) {
-  df %>%
-    complete(
-      N,
-      T0,
-      T1,
-      rho,
-      method = factor(
-        c("Proposed", "SCM", "BSCM"),
-        levels = c("Proposed", "SCM", "BSCM")
-      ),
-      fill = list(bias_point = NA_real_, rmse_point = NA_real_)
-    )
-}
-
-# 内部ユーティリティ: wide への整形（列名を "{N}:{method}" に固定）
-pivot_metric <- function(df, metric) {
-  df %>%
-    select(N, T0, T1, rho, method, value = .data[[metric]]) %>%
-    pivot_wider(
-      names_from = c(N, method),
-      values_from = value,
-      names_glue = "{N}:{method}"
-    )
-}
-
-stack_bias_rmse <- function(wide_bias, wide_rmse, rho_order, N_levels) {
-  col_keys <- expand.grid(
-    N = N_levels,
-    method = c("Proposed", "SCM", "BSCM"),
-    stringsAsFactors = FALSE
-  ) %>%
-    mutate(key = paste0(N, ":", method)) %>%
-    pull(key)
-
-  pick <- intersect(col_keys, names(wide_bias))
-  wide_bias <- wide_bias %>%
-    mutate(rho = factor(rho, levels = rho_order)) %>%
-    arrange(rho) %>%
-    select(rho, all_of(pick))
-
-  wide_rmse <- wide_rmse %>%
-    mutate(rho = factor(rho, levels = rho_order)) %>%
-    arrange(rho) %>%
-    select(rho, all_of(pick))
-
-  bias_block <- wide_bias %>%
-    mutate(Measure = "Bias") %>%
-    relocate(Measure, .before = rho)
-  rmse_block <- wide_rmse %>%
-    mutate(Measure = "RMSE") %>%
-    relocate(Measure, .before = rho)
-
-  list(
-    bias = bias_block,
-    rmse = rmse_block,
-    col_keys = pick,
-    N_levels = N_levels
-  )
-}
-
-# 1 パネル（特定の T0）を作成
-make_panel_table <- function(
-  df,
-  T0_target,
-  rho_order = c(-0.8, -0.3, -0.1, 0.0, 0.1, 0.3, 0.8),
-  caption = NULL
-) {
-  df1 <- df %>% filter(T0 == T0_target)
-
-  N_levels <- sort(unique(df1$N))
-
-  wb <- pivot_metric(df1, "bias_point")
-  wr <- pivot_metric(df1, "rmse_point")
-
-  blocks <- stack_bias_rmse(wb, wr, rho_order, N_levels = N_levels)
-  bias_block <- blocks$bias
-  rmse_block <- blocks$rmse
-  key_cols <- blocks$col_keys
-
-  panel_df <- bind_rows(bias_block, rmse_block)
-
-  bottom_labels <- c(
-    "Measure",
-    "$\\rho$",
-    rep(c("Proposed", "SCM", "BSCM"), length(c(16, 36, 64)))
-  )
-  spanners <- setNames(
-    rep(3, length(N_levels)),
-    paste0("$N=", N_levels, "$")
-  )
-
-  # テーブル本体
-  kb <- panel_df %>%
-    mutate(across(-c(Measure, rho), ~ ifelse(is.na(.x), NA, round(.x, 3)))) %>%
-    kable(
-      format = "latex",
-      booktabs = TRUE,
-      escape = FALSE,
-      col.names = c(
-        "Measure",
-        "$\\rho$",
-        rep(c("Proposed", "SCM", "BSCM"), length(N_levels))
-      ),
-      align = c("l", "c", rep("r", length(key_cols))),
-      caption = caption
-    ) %>%
-    add_header_above(c(" " = 2, spanners)) %>%
-    kable_styling(latex_options = c("hold_position")) %>%
-    row_spec(
-      nrow(bias_block),
-      extra_latex_after = "\\midrule[.2pt] \\addlinespace[0.25em]"
-    )
-
-  kb
-}
-```
-
-# Render Panel
-
-```{r plot-coverage, fig.width=7, fig.height=4}
-base_dir <- "inst/tables/mc_result"
-study <- data.frame()
-for (N in c(16, 36, 64)) {
-  for (T0 in c(20, 50)) {
-    for (T1 in c(20, 50)) {
-      output_path <- paste0(
-        output_dir,
-        "/mc_study_N=",
-        N,
-        "T0=",
-        T0,
-        "T1=",
-        T1,
-        ".csv"
+      fname = basename(file),
+      N = as.integer(str_match(fname, "N=(\\d+)")[, 2]),
+      T0 = as.integer(str_match(fname, "T0=(\\d+)")[, 2]),
+      T1 = as.integer(str_match(fname, "T1=(\\d+)")[, 2]),
+      data = map(
+        file,
+        ~ read_csv(.x, show_col_types = FALSE) %>%
+          # csv 側に N/T0/T1 が入っていてもここで落としておく
+          select(-any_of(c("N", "T0", "T1")))
       )
-      df_tmp <- read.csv(output_path)
-      study <- study %>% rbind(df_tmp)
-    }
-  }
+    )
+
+  res <- meta %>%
+    unnest(cols = data)
+
+  # メトリクスを分かりやすい名前にリネーム
+  res <- res %>%
+    rename(
+      Bias = bias_point,
+      RMSE = rmse_point,
+      CoverageRate = cover95_point
+    )
+
+  res
 }
 
-df_ready <- study %>%
-  normalize_methods() %>%
-  complete_grid()
+mc_res <- read_mc_results()
 
-spanners <- c("Baseline" = 3, "Follow-up" = 2) # 例：計5列がスパナー対象
-tab_a <- make_panel_table(
-  df_ready,
-  T0_target = 20,
-  caption = "Panel (a): $T_0=20$"
+## ------------------------------------------------------------
+## 2. Table 1 (Bias / RMSE: Proposed, SCM, BSCM) の panel を作る
+##    T0, T1 ごとに 1 個の panel を出力
+## ------------------------------------------------------------
+
+make_table1_panel <- function(
+  res,
+  T0_val,
+  T1_val,
+  file = glue("inst/tables/table1_T0={T0_val}_T1={T1_val}.tex")
+) {
+  df <- res %>%
+    filter(T0 == T0_val, T1 == T1_val) %>%
+    filter(method %in% c("Proposed", "SCM", "BSCM")) %>%
+    mutate(
+      method = factor(method, levels = c("Proposed", "SCM", "BSCM")),
+      rho = as.numeric(rho)
+    )
+
+  N_vals <- sort(unique(df$N))
+  rho_vals <- sort(unique(df$rho))
+
+  # 出力開始
+  con <- file(file, open = "w", encoding = "UTF-8")
+  on.exit(close(con), add = TRUE)
+
+  # ヘッダ（caption や table 環境は好みに応じて調整）
+  cat("\\begin{table}[!htbp]\n", file = con)
+  cat("\\centering\n", file = con)
+  cat(glue("% Panel: T0 = {T0_val}, T1 = {T1_val}\n"), file = con)
+  cat("\\begin{tabular}{l", file = con)
+  for (i in seq_along(N_vals)) {
+    cat(" rrr", file = con)
+  }
+  cat("}\n\\toprule\n", file = con)
+
+  # 1 行目: N 見出し
+  cat(" & ", file = con)
+  cat(
+    paste0(
+      glue("\\multicolumn{{3}}{{c}}{{$N = {N_vals}$}}"),
+      collapse = " & "
+    ),
+    file = con
+  )
+  cat(" \\\\\n", file = con)
+
+  # 2 行目: メソッド名
+  cat(" & ", file = con)
+  cat(
+    paste(
+      rep(c("Proposed", "SCM", "BSCM"), length(N_vals)),
+      collapse = " & "
+    ),
+    file = con
+  )
+  cat(" \\\\\n\\midrule\n", file = con)
+
+  fmt <- function(x) formatC(x, format = "f", digits = 3)
+
+  ## ---- Bias ブロック ----
+  cat(
+    "\\multicolumn{",
+    1 + 3 * length(N_vals),
+    "}{l}{Bias} \\\\\n",
+    sep = "",
+    file = con
+  )
+
+  for (r in rho_vals) {
+    cat(glue("${r}$"), file = con)
+    for (N0 in N_vals) {
+      tmp <- df %>%
+        filter(N == N0, rho == r) %>%
+        arrange(method)
+
+      vals <- fmt(tmp$Bias)
+      cat(" & ", paste(vals, collapse = " & "), file = con)
+    }
+    cat(" \\\\\n", file = con)
+  }
+
+  cat("\\midrule\n", file = con)
+
+  ## ---- RMSE ブロック ----
+  cat(
+    "\\multicolumn{",
+    1 + 3 * length(N_vals),
+    "}{l}{RMSE} \\\\\n",
+    sep = "",
+    file = con
+  )
+
+  for (r in rho_vals) {
+    cat(glue("${r}$"), file = con)
+    for (N0 in N_vals) {
+      tmp <- df %>%
+        filter(N == N0, rho == r) %>%
+        arrange(method)
+
+      vals <- fmt(tmp$RMSE)
+      cat(" & ", paste(vals, collapse = " & "), file = con)
+    }
+    cat(" \\\\\n", file = con)
+  }
+
+  cat("\\bottomrule\n\\end{tabular}\n\\end{table}\n", file = con)
+}
+
+## 例：図の Panel (a), (b) に対応しそうなもの
+## （必要なら T1_val は適宜変えてください）
+make_table1_panel(
+  mc_res,
+  T0_val = 20,
+  T1_val = 20,
+  file = "inst/tables/table1_panel_a.tex"
 )
-tab_a
-```
+make_table1_panel(
+  mc_res,
+  T0_val = 50,
+  T1_val = 20,
+  file = "inst/tables/table1_panel_b.tex"
+)
 
+## ------------------------------------------------------------
+## 3. Table 2 (Coverage Rate: Proposed のみ) を作る
+## ------------------------------------------------------------
 
+make_table2_tex <- function(
+  mc_res,
+  method_proposed = "SCSPILL",
+  out_file = "inst/tables/mc_table2.tex"
+) {
+  # ρ は numeric に揃える
+  mc_res <- mc_res %>%
+    mutate(rho = as.numeric(rho))
 
-```{r}
-# Save the LaTeX code for the main panel to a .tex file for inclusion in the manuscript.
-table_tex <- capture.output(tab_a, collapse = "\n")
-writeLines(table_tex, "./inst/tables/simulation_tables.tex")
-```
+  # proposed method だけ取り出し，カバレッジの MC 平均を計算
+  cov_df <- mc_res %>%
+    filter(method == method_proposed) %>%
+    group_by(T0, N, rho) %>%
+    summarise(coverage = mean(CoverageRate, na.rm = TRUE), .groups = "drop")
 
-```{r}
-sessionInfo()
+  # 想定：T0 は {20, 50}，N は {16, 36, 64}，rho は共通
+  t0_vals <- sort(unique(cov_df$T0))
+  rho_vals <- sort(unique(cov_df$rho))
+
+  # T0 = 20 のブロック
+  tab20 <- cov_df %>%
+    filter(T0 == t0_vals[1]) %>%
+    select(rho, N, coverage) %>%
+    pivot_wider(names_from = N, values_from = coverage) %>%
+    arrange(rho)
+
+  # T0 = 50 のブロック
+  tab50 <- cov_df %>%
+    filter(T0 == t0_vals[2]) %>%
+    select(rho, N, coverage) %>%
+    pivot_wider(names_from = N, values_from = coverage) %>%
+    arrange(rho)
+
+  # 列名は N=16,36,64 を想定
+  n_cols <- sort(setdiff(names(tab20), "rho"))
+
+  #--------------------------------------------------------
+  # 3. LaTeX 文字列を構築
+  #--------------------------------------------------------
+  lines <- c(
+    "\\begin{table}[!htbp]",
+    "\\centering",
+    "\\caption{Table 2: Coverage Rate of 95\\% Credible Interval for the proposed method}",
+    sprintf("%% using method == \"%s\"", method_proposed),
+    "\\begin{tabular}{lccc ccc}",
+    "\\toprule",
+    " & \\multicolumn{3}{c}{$T_0 = 20$} & \\multicolumn{3}{c}{$T_0 = 50$}\\\\",
+    "\\cmidrule(lr){2-4} \\cmidrule(lr){5-7}",
+    "$\\rho$ & $N = 16$ & $N = 36$ & $N = 64$ & $N = 16$ & $N = 36$ & $N = 64$ \\\\",
+    "\\midrule"
+  )
+
+  for (r in rho_vals) {
+    row20 <- tab20[tab20$rho == r, n_cols, drop = FALSE]
+    row50 <- tab50[tab50$rho == r, n_cols, drop = FALSE]
+
+    vals20 <- sprintf("%.3f", as.numeric(row20[1, ]))
+    vals50 <- sprintf("%.3f", as.numeric(row50[1, ]))
+
+    line_r <- sprintf(
+      "% .1f & %s & %s & %s & %s & %s & %s \\\\",
+      r,
+      vals20[1],
+      vals20[2],
+      vals20[3],
+      vals50[1],
+      vals50[2],
+      vals50[3]
+    )
+    lines <- c(lines, line_r)
+  }
+
+  lines <- c(lines, "\\bottomrule", "\\end{tabular}", "\\end{table}")
+
+  writeLines(lines, con = out_file)
+  invisible(out_file)
+}
+
+mc_res <- read_mc_results("inst/tables/mc_result")
+make_table2_tex(mc_res)
+
 ```

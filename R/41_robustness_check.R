@@ -179,7 +179,7 @@ prior_sensitivity <- function(
 ) {
   # Validate grid
   stopifnot(is.data.frame(grid))
-  req <- c("a0", "b0", "rho\\_lo", "rho\\_hi", "step\\_rho")
+  req <- c("a0", "b0", "rho_lo", "rho_hi", "step_rho")
   stopifnot(all(req %in% names(grid)))
 
   W_use <- row_normalize(W)

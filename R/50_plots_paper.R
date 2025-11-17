@@ -1,8 +1,8 @@
 paper_colors <- list(
-  proposed = "#D55E00", # オレンジ (E69F00 or D55E00)
-  scm = "#0072B2", # 青
-  obs = "#000000", # 黒
-  ribbon = "grey70" # CIリボンの色
+  proposed = "#D55E00",
+  scm = "#0072B2",
+  obs = "#000000",
+  ribbon = "grey70"
 )
 
 theme_scspill_paper <- function() {
@@ -184,7 +184,6 @@ plot_panel_outcomes <- function(
 
   # 6. Construct the ggplot object
   gg <- ggplot() +
-    # Main lines (will have a visible gap if skip_year is used)
     geom_line(
       data = obs_line,
       aes(idx, y, color = "Observed", linetype = "Observed"),
@@ -251,7 +250,6 @@ plot_panel_outcomes <- function(
     )
 
   interpolation_layers <- list(
-    # obs_gap が空でなければ、geom_line をリストの要素にする
     if (nrow(obs_gap) > 0) {
       geom_line(
         data = obs_gap,
@@ -261,7 +259,6 @@ plot_panel_outcomes <- function(
       )
     },
 
-    # prop_gap が空でなければ、geom_line をリストの要素にする
     if (nrow(prop_gap) > 0) {
       geom_line(
         data = prop_gap,
@@ -271,7 +268,6 @@ plot_panel_outcomes <- function(
       )
     },
 
-    # scm_gap が空でなければ、geom_line をリストの要素にする
     if (nrow(scm_gap) > 0) {
       geom_line(
         data = scm_gap,
@@ -455,7 +451,6 @@ plot_panel_effect <- function(
     }
   }
   interpolation_layers_eff <- list(
-    # eff_prop_gap が空でなければレイヤーを追加
     if (nrow(eff_prop_gap) > 0) {
       geom_line(
         data = eff_prop_gap,
@@ -465,7 +460,6 @@ plot_panel_effect <- function(
       )
     },
 
-    # eff_scm_gap が空でなければレイヤーを追加
     if (nrow(eff_scm_gap) > 0) {
       geom_line(
         data = eff_scm_gap,
@@ -480,7 +474,6 @@ plot_panel_effect <- function(
   gg
 }
 
-# .standardize_spill を修正 (time 軸を rownames から取得)
 .standardize_spill <- function(spill_raw_matrix) {
   M <- as.matrix(spill_raw_matrix)
   T_total <- nrow(M)
@@ -489,15 +482,13 @@ plot_panel_effect <- function(
     return(data.frame())
   }
 
-  # 時間軸 (rownames から取得)
   times <- rownames(M)
   if (is.null(times)) {
     times <- seq_len(T_total)
   } else {
-    times <- as.numeric(times) # 年号を数値に
+    times <- as.numeric(times)
   }
 
-  # ユニット名
   units <- colnames(M)
   if (is.null(units)) {
     units <- paste0("unit_", seq_len(N_units))
@@ -506,17 +497,15 @@ plot_panel_effect <- function(
   df <- data.frame(
     time = rep(times, times = N_units),
     unit = rep(units, each = T_total),
-    mean = as.numeric(M) # 列優先でベクトル化
+    mean = as.numeric(M)
   )
   df$unit <- as.character(df$unit)
   df
 }
 
-# tidy_scspill (spill 処理を .standardize_spill に任せる)
 tidy_scspill <- function(fit, time_col = NULL) {
   spill_df <- data.frame()
   if (!is.null(fit$effects) && !is.null(fit$effects$spill)) {
-    # effects$spill は (T0+T1) x N の行列 (rownames = time) を想定
     spill_df <- .standardize_spill(fit$effects$spill)
   }
 
@@ -592,7 +581,6 @@ plot_spillover_panel <- function(
 
   # 4. Construct the ggplot object
   gg <- ggplot() +
-    # Main lines (will have a gap)
     geom_line(
       data = df,
       aes(time, mean, group = unit),
@@ -601,7 +589,6 @@ plot_spillover_panel <- function(
       linetype = "solid"
     ) +
 
-    # Zero line
     geom_hline(yintercept = 0, linetype = "solid", linewidth = 0.3) +
     labs(x = x_title, y = y_title, title = main_title) +
     theme_scspill_paper() +
@@ -636,7 +623,6 @@ plot_spillover_panel <- function(
   }
 
   interpolation_layer_df <- list(
-    # df_gap が空でなければレイヤーを追加
     if (nrow(df_gap) > 0) {
       geom_line(
         data = df_gap,
@@ -694,7 +680,7 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
   w <- as.matrix(fit$inputs$w)
   W <- as.matrix(fit$inputs$W)
 
-  alpha_draws <- as.matrix(fit$alpha_draws) # M x N
+  alpha_draws <- as.matrix(fit$alpha_draws)
   rho_draws <- as.numeric(fit$rho_draws)
   M <- nrow(alpha_draws)
   IN <- diag(N)
@@ -708,7 +694,6 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
   for (m in seq_len(M)) {
     a <- alpha_draws[m, ]
     r <- rho_draws[m]
-    # ★ エラー回避: Ainv が特異行列になるケース
     Ainv <- tryCatch(
       solve(IN - r * (w %*% t(a) + W)),
       error = function(e) {
@@ -719,10 +704,9 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
           r,
           ". Returning NA."
         ))
-        return(matrix(NA_real_, N, N)) # NA行列を返す
+        return(matrix(NA_real_, N, N))
       }
     )
-    # Ainv が NA なら、このイテレーションはスキップ
     if (anyNA(Ainv)) {
       next
     }
@@ -745,7 +729,7 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
     t_idx = seq_len(T0),
     period = "pre",
     y_obs = Y0_pre,
-    y_cf_mean = rowMeans(ycf_pre_draws, na.rm = TRUE), # na.rm を追加
+    y_cf_mean = rowMeans(ycf_pre_draws, na.rm = TRUE),
     y_cf_lo = apply(
       ycf_pre_draws,
       1,
@@ -766,7 +750,7 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
     t_idx = T0 + seq_len(T1),
     period = "post",
     y_obs = Y0_post,
-    y_cf_mean = rowMeans(ycf_post_draws, na.rm = TRUE), # na.rm を追加
+    y_cf_mean = rowMeans(ycf_post_draws, na.rm = TRUE),
     y_cf_lo = apply(
       ycf_post_draws,
       1,
@@ -802,16 +786,13 @@ scm_counterfactual_light <- function(
   stopifnot(is.data.frame(data))
   df <- data
 
-  # 並びを固定（ベクトル抽出で確実に並び替え）
   ord <- order(df[[unit_col]], df[[time_col]])
   df <- df[ord, , drop = FALSE]
 
-  # マスク
   is_treated <- df[[unit_col]] == treated_unit
   is_pre <- df[[treatment_dummy]] == 0
   is_post <- df[[treatment_dummy]] == 1
 
-  # 年（横軸用）：ベクトルにしてから unique/sort
   years_pre <- sort(unique(df[[time_col]][is_treated & is_pre]))
   years_post <- sort(unique(df[[time_col]][is_treated & is_post]))
   T0 <- length(years_pre)
@@ -820,7 +801,6 @@ scm_counterfactual_light <- function(
     stop("No pre-treatment periods found for treated unit.")
   }
 
-  # treated の系列（pre/post）
   y_tr_pre <- df[[y]][is_treated & is_pre][order(df[[time_col]][
     is_treated & is_pre
   ])]
@@ -828,13 +808,11 @@ scm_counterfactual_light <- function(
     is_treated & is_post
   ])]
 
-  # donor ユニット
   donors <- setdiff(unique(df[[unit_col]]), treated_unit)
   if (length(donors) == 0) {
     stop("No donor units found.")
   }
 
-  # ヘルパー関数: ドナーの時系列を抽出
   .get_donor_series <- function(u, target_years) {
     idx_u <- (df[[unit_col]] == u)
     if (!any(idx_u)) {
@@ -852,7 +830,6 @@ scm_counterfactual_light <- function(
   X_pre <- sapply(donors, .get_donor_series, target_years = years_pre)
   X_post <- sapply(donors, .get_donor_series, target_years = years_post)
 
-  # 欠損補完
   fill_cols <- function(X) {
     X <- as.matrix(X)
     if (nrow(X) == 0) {
@@ -881,21 +858,14 @@ scm_counterfactual_light <- function(
     stop("Dimension mismatch in pre-period (SCM).")
   }
 
-  # ★★★ ここが正しいSCM重みの計算 ★★★
   if (!requireNamespace("quadprog", quietly = TRUE)) {
     stop("Package 'quadprog' is required. Please install.packages('quadprog').")
   }
   J <- ncol(X_pre)
-  # Dmat = X'X, dvec = X'y
   Dmat <- crossprod(X_pre)
   dvec <- crossprod(X_pre, y_tr_pre)
-  # 制約: A'w >= b
-  #  1. sum(w) = 1 (等式)
-  #  2. w >= 0 (不等式)
-  Amat <- cbind(rep(1, J), diag(J)) # 1列目が等式制約, 残りが不等式
   bvec <- c(1, rep(0, J))
 
-  # 数値安定化のため Dmat にリッジを加える
   ridge <- mean(diag(Dmat)) * 1e-8
   Dmat <- Dmat + diag(ridge, J)
 
@@ -920,9 +890,6 @@ scm_counterfactual_light <- function(
   if (sum(w_hat) > 1e-8) {
     w_hat <- w_hat / sum(w_hat)
   }
-  # ★★★ 計算完了 ★★★
-
-  # 反事実：pre は可視化上、観測と完全一致させる（論文体裁）
   y_cf_pre <- y_tr_pre
   y_cf_post <- as.numeric(X_post %*% w_hat)
 
@@ -941,8 +908,7 @@ create_spillover_annotations <- function(
   time_offset = -1.0,
   vjust_list = NULL
 ) {
-  # 1. tidy_scspill を使ってロング形式のデータを取得
-  td <- tidy_scspill(fit, time_col = "year") # time_col は将来用
+  td <- tidy_scspill(fit, time_col = "year")
   df <- td$spill
 
   if (!nrow(df)) {
@@ -950,7 +916,6 @@ create_spillover_annotations <- function(
     return(data.frame())
   }
 
-  # 2. 指定された年 (time_point) のデータを抽出
   df_at_time <- df[df$time == time_point, ]
   if (!nrow(df_at_time)) {
     warning(paste(
@@ -961,14 +926,12 @@ create_spillover_annotations <- function(
     return(data.frame())
   }
 
-  # 3. 指定されたユニットの y 座標 (mean) を取得
   ann_df <- data.frame(
     label = units_to_label,
     time = time_point,
     stringsAsFactors = FALSE
   )
 
-  # ユニット名でマージして y 座標を取得
   ann_df <- merge(
     ann_df,
     df_at_time[, c("unit", "mean")],
@@ -977,31 +940,51 @@ create_spillover_annotations <- function(
     all.x = TRUE
   )
 
-  # マージ後の y カラム名を変更
   names(ann_df)[names(ann_df) == "mean"] <- "y"
 
-  # 4. オフセットを追加
-  ann_df$hjust <- 1 # 右揃え
+  ann_df$hjust <- 1
   ann_df$vjust <- if (is.null(vjust_list)) 0.5 else vjust_list
 
-  # time_offset を time に適用 (テキスト描画用)
-  # (注: plot_spillover_panel 側の geom_segment / geom_text が
-  #  time + time_offset のような計算をする前提なら、ここでは time_point のままにする)
-  #
-  # plot_spillover_panel (L. 283) のロジック 'x = time - 1.0' に合わせるため、
-  # ここでは time と y だけを返せばOK
+  return(ann_df)
+}
 
-  # マッチしなかったユニットがあれば警告
-  if (anyNA(ann_df$y)) {
-    missing_units <- ann_df$label[is.na(ann_df$y)]
-    warning(paste(
-      "以下のユニットが",
-      time_point,
-      "年に見つかりません:",
-      paste(missing_units, collapse = ", ")
-    ))
-    ann_df <- ann_df[!is.na(ann_df$y), ]
+compute_scm_weights <- function(Y0_pre, Yc_pre) {
+  Y0_pre <- as.numeric(Y0_pre)
+  Yc_pre <- as.matrix(Yc_pre)
+
+  T0 <- length(Y0_pre)
+  N <- ncol(Yc_pre)
+
+  Dmat <- crossprod(Yc_pre)
+  ridge <- 1e-8
+  Dmat <- Dmat + ridge * diag(N)
+  dvec <- crossprod(Yc_pre, Y0_pre)
+
+  Amat <- cbind(
+    rep(1, N),
+    diag(N)
+  )
+  bvec <- c(1, rep(0, N))
+  meq <- 1
+
+  sol <- quadprog::solve.QP(
+    Dmat = Dmat,
+    dvec = dvec,
+    Amat = Amat,
+    bvec = bvec,
+    meq = meq
+  )
+
+  w_scm <- sol$solution
+
+  w_scm[w_scm < 0] <- 0
+  if (sum(w_scm) > 0) {
+    w_scm <- w_scm / sum(w_scm)
   }
 
-  return(ann_df)
+  if (!is.null(colnames(Yc_pre))) {
+    names(w_scm) <- colnames(Yc_pre)
+  }
+
+  w_scm
 }

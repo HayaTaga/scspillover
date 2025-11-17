@@ -604,7 +604,7 @@ plot_spillover_panel <- function(
     gg <- gg +
       geom_segment(
         data = annotations_df,
-        aes(x = time - 0.8, xend = time - 0.1, y = y, yend = y),
+        aes(x = time - 0.8, xend = time - 0.1, y = y-0.2, yend = y),
         arrow = arrow(length = unit(0.08, "in")),
         inherit.aes = FALSE
       ) +
@@ -612,7 +612,7 @@ plot_spillover_panel <- function(
         data = annotations_df,
         aes(
           x = time - 1.0,
-          y = y,
+          y = y-0.2,
           label = label,
           hjust = 1,
           vjust = vjust %||% 0.5
@@ -858,38 +858,7 @@ scm_counterfactual_light <- function(
     stop("Dimension mismatch in pre-period (SCM).")
   }
 
-  if (!requireNamespace("quadprog", quietly = TRUE)) {
-    stop("Package 'quadprog' is required. Please install.packages('quadprog').")
-  }
-  J <- ncol(X_pre)
-  Dmat <- crossprod(X_pre)
-  dvec <- crossprod(X_pre, y_tr_pre)
-  bvec <- c(1, rep(0, J))
-
-  ridge <- mean(diag(Dmat)) * 1e-8
-  Dmat <- Dmat + diag(ridge, J)
-
-  # QP ソルバーを実行
-  res_qp <- tryCatch(
-    quadprog::solve.QP(
-      Dmat = Dmat,
-      dvec = dvec,
-      Amat = Amat,
-      bvec = bvec,
-      meq = 1
-    ),
-    error = function(e) {
-      warning(paste(
-        "quadprog::solve.QP failed, returning equal weights. Error:",
-        e$message
-      ))
-      return(list(solution = rep(1 / J, J)))
-    }
-  )
-  w_hat <- pmax(res_qp$solution, 0)
-  if (sum(w_hat) > 1e-8) {
-    w_hat <- w_hat / sum(w_hat)
-  }
+  w_hat <- compute_scm_weights(y_tr_pre, X_pre)
   y_cf_pre <- y_tr_pre
   y_cf_post <- as.numeric(X_post %*% w_hat)
 
@@ -949,42 +918,18 @@ create_spillover_annotations <- function(
 }
 
 compute_scm_weights <- function(Y0_pre, Yc_pre) {
-  Y0_pre <- as.numeric(Y0_pre)
-  Yc_pre <- as.matrix(Yc_pre)
-
-  T0 <- length(Y0_pre)
-  N <- ncol(Yc_pre)
-
-  Dmat <- crossprod(Yc_pre)
-  ridge <- 1e-4
-  Dmat <- Dmat + ridge * diag(N)
-  dvec <- crossprod(Yc_pre, Y0_pre)
-
-  Amat <- cbind(
-    rep(1, N),
-    diag(N)
-  )
-  bvec <- c(1, rep(0, N))
-  meq <- 1
-
-  sol <- quadprog::solve.QP(
-    Dmat = Dmat,
-    dvec = dvec,
-    Amat = Amat,
-    bvec = bvec,
-    meq = meq
-  )
-
-  w_scm <- sol$solution
-
-  w_scm[w_scm < 0] <- 0
-  if (sum(w_scm) > 0) {
-    w_scm <- w_scm / sum(w_scm)
-  }
-
-  if (!is.null(colnames(Yc_pre))) {
-    names(w_scm) <- colnames(Yc_pre)
-  }
-
-  w_scm
+   y  <- as.numeric(Y0_pre)
+  X  <- as.matrix(Yc_pre)
+  N  <- ncol(X)
+  
+  # 目的関数: min ||X w - y||^2
+  E <- matrix(1, nrow = 1, ncol = N)    # E w = f  （和＝1）
+  f <- 1
+  G <- diag(N)                          # G w >= h （w >= 0）
+  h <- rep(0, N)
+  
+  fit <- limSolve::lsei(A = X, B = y,
+                        E = E, F = f,
+                        G = G, H = h)
+  as.numeric(fit$X)
 }

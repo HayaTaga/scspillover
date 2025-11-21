@@ -92,10 +92,10 @@ p <- diagnostics.scspill(
 print(p)
 
 ggsave(
-  filename = "inst/figures/fig_ca_diag.pdf",
+  filename = "inst/figures/fig_ca_diag.png",
   plot = p,
-  width = 6.8,
-  height = 4.5,
+  width = 12.0,
+  height = 6.0,
   dpi = 300,
 )
 
@@ -104,37 +104,27 @@ diag_tab[order(diag_tab$ess, decreasing = TRUE), ]
 
 digits_vec <- rep(3L, ncol(diag_tab))
 names(digits_vec) <- names(diag_tab)
-digits_vec[c("n")] <- 0L
+# digits_vec[c("n")] <- 0L
 digits_vec[c(
   "mean",
   "sd",
   "q025",
-  "q05",
   "q50",
-  "q95",
   "q975",
-  "mcse",
-  "act",
-  "rhat\\_split",
-  "geweke_\\z"
+  "ess",
+  "rhat\\_split"
 )] <- 4L
 digits_vec <- digits_vec[colnames(diag_tab)]
 
 col_labels <- c(
   parameter = "Parameter",
-  n = "$M$",
   mean = "Mean",
   sd = "SD",
-  q025 = "$q_{0.025}$",
-  q05 = "$q_{0.05}$",
-  q50 = "$q_{0.50}$",
-  q95 = "$q_{0.95}$",
-  q975 = "$q_{0.975}$",
+  q025 = "$2.5\\%$",
+  q50 = "$50\\%$",
+  q975 = "$97.5\\%$",
   ess = "ESS",
-  mcse = "MCSE",
-  act = "ACT",
-  rhat_split = "$\\hat{R}_{\\mathrm{split}}$",
-  geweke_z = "Geweke $Z$"
+  rhat_split = "$\\hat{R}$"
 )
 col_labels <- col_labels[colnames(diag_tab)]
 
@@ -155,9 +145,12 @@ cat(latex_code, file = "inst/tables/ca_diag_table.tex")
 
 
 ```{r}
+print(round(fit$rho_hat, digits = 3))
+print(round(quantile(fit$rho_draws, probs = c(0.025, 0.975)), digits = 3))
+
 annote_prop99 <- data.frame(
-  time = 1987, # 矢印の付け根のX座標（年）
-  y = -0.5, # 矢印の付け根のY座標
+  time = 1988, # 矢印の付け根のX座標（年）
+  y = -10.0, # 矢印の付け根のY座標
   label = "Proposition 99",
   hjust = 1, # テキストを矢印の左側に配置
   vjust = 0.5
@@ -168,7 +161,7 @@ p_a <- plot_panel_outcomes(
   data = panel_df,
   treated_unit = "California",
   treatment_dummy = "treatment",
-  y = colnames(panel_df)[4],
+  y = "cigsale",
   unit_col = "state",
   time_col = "year",
   title = "",
@@ -198,8 +191,8 @@ p_b
 ggsave(
   filename = "inst/figures/fig_ca_panelB.pdf",
   plot = p_b,
-  width = 6.8,
-  height = 4.5,
+  width = 8.0,
+  height = 4.0,
   dpi = 300,
 )
 
@@ -222,9 +215,9 @@ annote_spill <- annote_spill[-3, ]
 
 p_spill <- plot_spillover_panel(
   fit = fit,
-  main_title = "Estimates of the Spillover Effects of California Tobacco Tax",
   vline_at = 1988, # 垂直線
-  annotations_df = annote_spill
+  annotations_df = annote_spill,
+  main_title = ""
 )
 
 p_spill
@@ -232,8 +225,8 @@ p_spill
 ggsave(
   filename = "inst/figures/fig_ca_panel_spillover.pdf",
   plot = p_spill,
-  width = 6.8,
-  height = 4.5,
+  width = 8.0,
+  height = 4.0,
   dpi = 300,
 )
 
@@ -288,27 +281,37 @@ Xc_pre <- panel_df %>%
 dim(Xc_pre) <- c(nrow(Xc_pre), ncol(Xc_pre), 1)
 
 alpha_hat <- colMeans(fit$alpha_draws)
-sds_Yc <- apply(Yc_pre_obs, 2, sd)
-sds_Yc[!is.finite(sds_Yc) | sds_Yc < 1e-8] <- 1
-alpha_hat_scaled <- alpha_hat / sds_Yc
 
 sens <- prior_sensitivity(
   Yc_obs = Yc_pre_obs, # 観測（T0 x N）
   W_raw = W,
   w_raw = w,
-  alpha_hat_scaled = alpha_hat_scaled,
+  alpha_hat_scaled = alpha_hat,
   Xc_pre = Xc_pre,
   p = 0L,
   grid = grid,
-  M_burn = 50000L,
-  M_keep = 100000L
+  M_burn = 500000L,
+  M_keep = 1000000L
 )
 
-sens$theta_table
+tbl <- sens$theta_table
 
-colnames(sens$theta_table) <- gsub("_", "\\\\_", colnames(sens$theta_table))
+# colnames(sens$theta_table) <- gsub("_", "\\\\_", colnames(sens$theta_table))
+new_names <- c(
+  "a0" = "$a_0$",
+  "b0" = "$b_0$",
+  "rho_lo" = "$\\rho_{\\mathrm{lo}}$",
+  "rho_hi" = "$\\rho_{\\mathrm{hi}}$",
+  "step_rho" = "$\\Delta\\rho$",
+  "param" = "Parameter",
+  "mean" = "Mean",
+  "sd" = "SD",
+  "q025" = "$2.5\\%$",
+  "q975" = "$97.5\\%$"
+)
+colnames(tbl) <- new_names[colnames(tbl)]
 
-sens$theta_table %>%
+tbl %>%
   kable(
     "latex",
     booktabs = TRUE,
@@ -343,6 +346,7 @@ create_ppa_table <- function(ppc_results) {
     seq_along(obs_names),
     function(i) {
       stat_name <- obs_names[i]
+      colnames(sim_stats) <- gsub("\\\\", "", colnames(sim_stats))
       sim_col <- sim_stats[[stat_name]]
       obs_val <- obs_stats_vec[i]
 
@@ -371,13 +375,13 @@ ppc <- prior_predictive(
   Yc_obs = Yc_pre_obs,
   W_raw = W,
   w_raw = w,
-  alpha_hat_scaled = alpha_hat_scaled,
+  alpha_hat_scaled = alpha_hat,
   Xc_pre = Xc_pre,
   p = 0L,
-  a0 = 1,
+  a0 = 3,
   b0 = 1,
-  rho_support = c(-0.9, 0.9),
-  R = 200000
+  rho_support = c(-0.99, 0.99),
+  R = 100000
 )
 
 stat_names <- c(
@@ -448,7 +452,7 @@ gg <- ggplot(sim_long, aes(x = simulated_value)) +
     strip.text = element_text(face = "bold") # 各パネルのタイトル (e.g., "yc_mean")
   ) +
   labs(
-    title = "Prior Predictive Analysis (California)",
+    # title = "Prior Predictive Analysis (California)",
     x = "Statistic Value",
     y = "Frequency"
   )
@@ -458,21 +462,33 @@ print(gg)
 ggsave(
   filename = "inst/figures/fig_ca_prior_predictive.pdf",
   plot = gg,
-  width = 7.0,
+  width = 8.0,
   height = 4.0,
   dpi = 300,
 )
 
 ppc_table <- create_ppa_table(ppc)
+
+rename_vec <- c(
+  yc_mean = "Mean",
+  log_yc_var = "log-Var",
+  spatial_quadratic = "Spatial Quad.",
+  corr_y0_wyc = "Corr($Y_0$, $w'Y$)",
+  ac1 = "AC(1)",
+  ac2 = "AC(2)",
+  pve_pc1 = "PVE(PC1)",
+  avg_skewness = "Skewness",
+  avg_kurtosis = "Kurtosis"
+)
+ppc_table$Statistic <- rename_vec[ppc_table$Statistic]
+ppc_table$Observed_Value_h_y_obs <- round(ppc_table$Observed_Value_h_y_obs, 3)
+ppc_table$P_Value_P_h_y_obs <- round(ppc_table$P_Value_P_h_y_obs, 3)
+
 print(ppc_table)
 
 write.csv(ppc_table, "inst/tables/ca_ppa_summary_table.csv", row.names = FALSE)
 
-latex_col_names <- c(
-  "Statistic $h(y)$",
-  "Observed $h(y^o)$",
-  "$P(h \\le h(y^o) | A)$"
-)
+latex_col_names <- c("Statistic", "Observed", "$P(h \\leq h(y°) | A)$")
 
 ppc_table <- ppc_table %>% mutate(Statistic = gsub("_", "\\\\_", Statistic))
 
@@ -683,4 +699,43 @@ ggsave(
   height = 5.5,
   width = 11
 )
+```
+
+
+
+```{r}
+a <- read_csv("data/raw/IMF_trade.csv")
+a %>%
+  filter(COUNTRY == "Egypt, Arab Republic of") %>%
+  filter(COUNTERPART_COUNTRY == "Sudan") %>%
+  count(TIME_PERIOD)
+a %>%
+  filter(COUNTRY == "Sudan") %>%
+  filter(COUNTERPART_COUNTRY == "Egypt, Arab Republic of") %>%
+  count(TIME_PERIOD)
+a %>% select(COUNTRY) %>% unique()
+b <- read.csv(
+  "data/raw/P_Data_Extract_From_World_Development_Indicators/24cc87ae-8d91-47e6-b829-e467008e1958_Data.csv",
+  na = c("..", ""),
+  stringsAsFactors = FALSE
+)
+b %>% select(Country.Name) %>% unique()
+
+dot_raw <- read.csv("data/raw/IMF_trade.csv", stringsAsFactors = FALSE)
+dot_iso <- dot_raw %>%
+  mutate(
+    reporter_iso3 = countrycode::countrycode(
+      COUNTRY,
+      origin = "country.name",
+      destination = "iso3c",
+      warn = FALSE
+    ),
+    partner_iso3 = countrycode::countrycode(
+      COUNTERPART_COUNTRY,
+      origin = "country.name",
+      destination = "iso3c",
+      warn = FALSE
+    )
+  )
+dot_iso
 ```

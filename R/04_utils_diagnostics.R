@@ -219,7 +219,7 @@ diagnostics.scspill <- function(
     K <- ncol(beta_draws)
     beta_names <- colnames(beta_draws)
     if (is.null(beta_names)) {
-      beta_names <- paste0("beta\\_", seq_len(K))
+      beta_names <- paste0("beta", seq_len(K))
     }
 
     if (is.null(which_beta)) {
@@ -270,7 +270,7 @@ diagnostics.scspill <- function(
     ggplot2::labs(
       x = "Iteration",
       y = "Value",
-      title = "Trace plots (rho / alpha / beta / sigma2 / tau2)"
+      title = "Trace plots (rho / alpha / beta / sigma2)"
     )
 
   # ---- summary table ----
@@ -287,19 +287,19 @@ diagnostics.scspill <- function(
       gz <- .geweke_z(x)
       data.frame(
         parameter = nm,
-        n = n,
+        # n = n,
         mean = mean(x),
         sd = stats::sd(x),
         q025 = qs[1],
-        q05 = qs[2],
+        # q05 = qs[2],
         q50 = qs[3],
-        q95 = qs[4],
+        # q95 = qs[4],
         q975 = qs[5],
         ess = ess,
-        mcse = mcse,
-        act = act,
+        # mcse = mcse,
+        # act = act,
         rhat_split = rhat,
-        geweke_z = gz,
+        # geweke_z = gz,
         row.names = NULL,
         check.names = FALSE
       )

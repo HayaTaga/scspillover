@@ -135,6 +135,12 @@ wide_dat <- wide_dat %>%
       )
     )
   )
+country_dict <- wide_dat %>%
+  distinct(
+    iso3 = country_code,
+    country = country
+  ) %>%
+  filter(!is.na(iso3), !is.na(country))
 
 final_dat <- wide_dat %>%
   dplyr::select(
@@ -333,7 +339,6 @@ readr::write_csv(final_dat, "data/processed/Sudan/africa_panel.csv")
 readr::write_csv(final_dat_strict, "data/processed/Sudan/africa_panel_drop.csv")
 readr::write_csv(col_dict, "data/processed/Sudan/column_dictionary.csv")
 
-
 # ============================================================
 # DOT -> trade matrix (no row-normalization, no single-side fill)
 #   1) build annual bilateral amounts A_ij(t) using ONLY years
@@ -353,11 +358,39 @@ sudan_name <- "Sudan"
 # --- Load DOT raw (replace path)
 dot_raw <- read.csv("data/raw/IMF_trade.csv", stringsAsFactors = FALSE)
 
+dot_iso <- dot_raw %>%
+  mutate(
+    reporter_iso3 = countrycode::countrycode(
+      COUNTRY,
+      origin = "country.name",
+      destination = "iso3c",
+      warn = FALSE
+    ),
+    partner_iso3 = countrycode::countrycode(
+      COUNTERPART_COUNTRY,
+      origin = "country.name",
+      destination = "iso3c",
+      warn = FALSE
+    )
+  )
+
+countries_keep_iso3 <- unique(raw$Country.Code)
 # --- Scale map (extend if needed)
 scale_map <- c("Millions" = 1e6, "Units" = 1)
 
 # --- Clean & parse
-dot_clean <- dot_raw %>%
+dot_clean <- dot_iso %>%
+  filter(
+    reporter_iso3 %in% countries_keep_iso3,
+    partner_iso3 %in% countries_keep_iso3
+  ) %>%
+  rename(
+    reporter = reporter_iso3,
+    partner = partner_iso3,
+    year = TIME_PERIOD
+  )
+
+dot_clean <- dot_clean %>%
   mutate(
     multiplier = unname(scale_map[trimws(SCALE)]),
     multiplier = ifelse(is.na(multiplier), 1, multiplier),
@@ -373,18 +406,8 @@ dot_clean <- dot_raw %>%
       TRUE ~ NA_character_
     )
   ) %>%
-  rename(
-    reporter = COUNTRY,
-    partner = COUNTERPART_COUNTRY,
-    year = TIME_PERIOD
-  ) %>%
   mutate(year = as.integer(year)) %>%
   filter(FREQUENCY == "Annual", year %in% years_pre)
-
-# --- Restrict to countries appearing in your final panel
-countries_keep <- sort(unique(final_dat_strict$country))
-dot_clean <- dot_clean %>%
-  filter(reporter %in% countries_keep, partner %in% countries_keep)
 
 # --- Collapse valuation/flow per (i,j,t)
 #     imports: prefer CIF > FOB; exports: FOB; then trade_ij = imports_pref + exports_fob
@@ -449,9 +472,14 @@ make_matrix <- function(df_y, countries) {
   M
 }
 
+filtered_country <- final_dat_strict %>% select(country) %>% distinct()
+countries_keep_iso3 <- country_dict %>%
+  filter(country %in% filtered_country$country)
+countries_keep_iso3 <- countries_keep_iso3$iso3
+
 A_year_list <- sym_both %>%
   dplyr::group_by(year) %>%
-  dplyr::group_map(~ make_matrix(.x, countries_keep)) %>%
+  dplyr::group_map(~ make_matrix(.x, countries_keep_iso3)) %>%
   setNames(sort(unique(sym_both$year)))
 
 if (length(A_year_list) == 0) {
@@ -474,7 +502,7 @@ A_count <- Reduce(
   })
 )
 A_avg <- A_sum / ifelse(A_count > 0, A_count, NA_real_)
-dimnames(A_avg) <- list(countries_keep, countries_keep)
+dimnames(A_avg) <- list(countries_keep_iso3, countries_keep_iso3)
 diag(A_avg) <- 0
 
 # --- Zero-fill ONLY pairs never observed in any year (keep observed means)
@@ -483,7 +511,7 @@ A_avg0[is.na(A_avg0)] <- 0
 diag(A_avg0) <- 0
 
 # --- Sudan row vector (unnormalized, after zero-fill)
-sudan_name <- "Sudan"
+sudan_name <- "SDN"
 w_sudan <- if (sudan_name %in% rownames(A_avg0)) {
   A_avg0[sudan_name, , drop = TRUE]
 } else {
@@ -509,6 +537,10 @@ if (length(sudan_idx) > 0) {
   sudan_vec_final <- w_sudan
 }
 
+iso_to_name <- setNames(country_dict$country, country_dict$iso3)
+country_iso <- colnames(A_avg0)
+country_names <- unname(iso_to_name[country_iso])
+dimnames(A_avg0) <- list(country_names, country_names)
 # --- Write outputs
 write.csv(A_avg0, "data/processed/Sudan/weight_mat.csv", row.names = TRUE)
 if (!is.null(sudan_vec_final)) {
@@ -524,8 +556,42 @@ if (!is.null(sudan_vec_final)) {
 
 rm(list = ls())
 panel_df <- read_csv("data/processed/Sudan/africa_panel_drop.csv")
-w <- read_csv("data/processed/Sudan/weight_vec.csv")
-W <- read_csv("data/processed/Sudan/weight_mat.csv")
+w <- read_csv("data/processed/Sudan/weight_vec.csv") %>% arrange(country)
+W <- read_csv("data/processed/Sudan/weight_mat.csv") %>% arrange("...1")
+
+countries_panel <- panel_df %>%
+  distinct(country_id, country) %>%
+  arrange(country_id) %>%
+  pull(country)
+
+countries_W <- W$...1
+countries_w <- w$country
+
+common_countries <- Reduce(
+  intersect,
+  list(countries_panel, countries_W, countries_w)
+)
+
+panel_df <- panel_df %>%
+  filter(country %in% common_countries | country == "Sudan")
+
+order_countries <- countries_panel[countries_panel %in% common_countries]
+
+W_mat <- W %>%
+  column_to_rownames("...1") %>%
+  as.matrix()
+
+W_mat <- W_mat[order_countries, order_countries, drop = FALSE]
+
+W <- W_mat %>%
+  as.data.frame() %>%
+  rownames_to_column("country") %>%
+  as_tibble()
+
+w <- w %>%
+  filter(country %in% order_countries) %>%
+  mutate(country = factor(country, levels = order_countries)) %>%
+  arrange(country)
 
 sudan_secession <- list(
   panel_df = panel_df,

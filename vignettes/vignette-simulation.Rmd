@@ -292,9 +292,6 @@ library(stringr)
 library(readr)
 library(glue)
 
-## ------------------------------------------------------------
-## 1. mc_study_*.csv を読み込んで一つの long データにする
-## ------------------------------------------------------------
 
 read_mc_results <- function(dir = "inst/tables/mc_result") {
   files <- list.files(
@@ -306,24 +303,24 @@ read_mc_results <- function(dir = "inst/tables/mc_result") {
   meta <- tibble(file = files) %>%
     mutate(
       fname = basename(file),
-      N  = as.integer(str_match(fname, "N=(\\d+)")[, 2]),
+      N = as.integer(str_match(fname, "N=(\\d+)")[, 2]),
       T0 = as.integer(str_match(fname, "T0=(\\d+)")[, 2]),
       T1 = as.integer(str_match(fname, "T1=(\\d+)")[, 2]),
       data = map(
         file,
         ~ readr::read_csv(.x, show_col_types = FALSE) %>%
-          select(-any_of(c("N", "T0", "T1")))  # CSV 側の重複列は落とす
+          select(-any_of(c("N", "T0", "T1")))
       )
     )
-  print(meta)
   res <- meta %>%
     unnest(cols = data) %>%
     rename(
-      Bias         = bias_point,
-      RMSE         = rmse_point,
+      Bias = bias_point,
+      RMSE = rmse_point,
       CoverageRate = cover95_point
     )
-
+  res <- res %>%
+    mutate(method = ifelse(method == "SCSPILL", "Proposed", method))
   res
 }
 
@@ -335,21 +332,20 @@ make_table1_panel_lines <- function(res, T0_val, T1_val, panel_label) {
     filter(method %in% c("Proposed", "SCM", "BSCM")) %>%
     mutate(
       method = factor(method, levels = c("Proposed", "SCM", "BSCM")),
-      rho    = as.numeric(rho)
+      rho = as.numeric(rho)
     )
 
-  N_vals   <- sort(unique(df$N))
+  N_vals <- sort(unique(df$N))
   rho_vals <- sort(unique(df$rho))
+  rho_vals <- round(rho_vals, digits = 1)
 
   fmt <- function(x) formatC(x, format = "f", digits = 3)
 
-  # 列フォーマット：l + 3列×|N| 個
-  col_spec <- paste0("l", paste(rep("rrr", length(N_vals)), collapse = ""))
+  col_spec <- paste0("ll", paste(rep("rrr", length(N_vals)), collapse = ""))
 
-  # cmidrule の範囲 (例: 3-5, 6-8, 9-11)
   cmid_lines <- map_chr(seq_along(N_vals), function(i) {
     start <- 3 + 3 * (i - 1)
-    end   <- start + 2
+    end <- start + 2
     glue("\\cmidrule(lr){{{start}-{end}}}")
   }) %>%
     paste(collapse = "")
@@ -357,16 +353,14 @@ make_table1_panel_lines <- function(res, T0_val, T1_val, panel_label) {
   lines <- c(
     glue("\\caption*{{Panel ({panel_label}): $T_0={T0_val}$}}"),
     glue("\\label{{5.2 Simulation panel {panel_label}}}"),
-    glue("\\begin{tabular}{{{col_spec}}}"),
+    glue("\\begin{{tabular}}{{{col_spec}}}"),
     "\\hline",
-    # ヘッダ 1 行目
     "\\multicolumn{2}{l}{} & ",
     paste(
       map_chr(N_vals, ~ glue("\\multicolumn{{3}}{{c}}{{$N={.x}$}}")),
       collapse = " & "
     ),
     " \\\\",
-    # ヘッダ 2 行目
     cmid_lines,
     "\n",
     "\\multicolumn{1}{l}{} & \\multicolumn{1}{l}{$\\rho$} & ",
@@ -374,18 +368,19 @@ make_table1_panel_lines <- function(res, T0_val, T1_val, panel_label) {
     " \\\\ \\hline"
   )
 
-  ## ---- Bias ブロック ----
-  lines <- c(lines, "Bias ")
-
   first <- TRUE
   for (r in rho_vals) {
     if (first) {
       line <- " & "
       first <- FALSE
     } else {
-      line <- "& "
+      if (r == 0.0) {
+        line <- "Bias & "
+      } else {
+        line <- "& "
+      }
     }
-    line <- paste0(line, fmt(r))
+    line <- paste0(line, round(r, digits = 1))
     for (N0 in N_vals) {
       tmp <- df %>%
         filter(N == N0, rho == r) %>%
@@ -398,18 +393,19 @@ make_table1_panel_lines <- function(res, T0_val, T1_val, panel_label) {
 
   lines <- c(lines, "\\hdashline")
 
-  ## ---- RMSE ブロック ----
-  lines <- c(lines, "RMSE ")
-
   first <- TRUE
   for (r in rho_vals) {
     if (first) {
       line <- " & "
       first <- FALSE
     } else {
-      line <- "& "
+      if (r == 0.0) {
+        line <- "RMSE & "
+      } else {
+        line <- "& "
+      }
     }
-    line <- paste0(line, fmt(r))
+    line <- paste0(line, round(r, digits = 1))
     for (N0 in N_vals) {
       tmp <- df %>%
         filter(N == N0, rho == r) %>%
@@ -433,9 +429,9 @@ make_table2_lines <- function(mc_res, method_proposed = "Proposed") {
     filter(method == method_proposed) %>%
     group_by(T0, N, rho) %>%
     summarise(coverage = mean(CoverageRate, na.rm = TRUE), .groups = "drop")
-
-  t0_vals  <- sort(unique(cov_df$T0))  # 想定: 20, 50
+  t0_vals <- sort(unique(cov_df$T0))
   rho_vals <- sort(unique(cov_df$rho))
+  print(mc_res)
 
   tab20 <- cov_df %>%
     filter(T0 == t0_vals[1]) %>%
@@ -456,7 +452,7 @@ make_table2_lines <- function(mc_res, method_proposed = "Proposed") {
     "\\centering",
     "\\caption{Coverage Rate of 95\\% Credible Interval for the Proposed Method}",
     "\\label{5.2 Simulation coverage rate}",
-    "\\begin{tabular}{rrrrrrrr}",
+    "\\begin{tabular}{lrrrrrrr}",
     "\\hline",
     "       & \\multicolumn{3}{c}{$T_{0}=20$} & & \\multicolumn{3}{c}{$T_{0}=50$}  \\\\ ",
     "\\cmidrule(lr){2-4} \\cmidrule(lr){6-8}",
@@ -472,8 +468,13 @@ make_table2_lines <- function(mc_res, method_proposed = "Proposed") {
 
     line_r <- sprintf(
       "% .1f & %s & %s & %s & & %s & %s & %s \\\\",
-      r, vals20[1], vals20[2], vals20[3],
-      vals50[1], vals50[2], vals50[3]
+      r,
+      vals20[1],
+      vals20[2],
+      vals20[3],
+      vals50[1],
+      vals50[2],
+      vals50[3]
     )
     lines <- c(lines, line_r)
   }
@@ -499,17 +500,17 @@ write_simulation_tables <- function(
 ) {
   # パネル (a): T0 = 20
   lines_panel_a <- make_table1_panel_lines(
-    res         = mc_res,
-    T0_val      = 20,
-    T1_val      = T1_val,
+    res = mc_res,
+    T0_val = 20,
+    T1_val = T1_val,
     panel_label = "a"
   )
 
   # パネル (b): T0 = 50
   lines_panel_b <- make_table1_panel_lines(
-    res         = mc_res,
-    T0_val      = 50,
-    T1_val      = T1_val,
+    res = mc_res,
+    T0_val = 50,
+    T1_val = T1_val,
     panel_label = "b"
   )
 
@@ -518,13 +519,11 @@ write_simulation_tables <- function(
     "\\begin{table}[H]",
     "\\centering",
     "\\caption{Simulation Results for Bias and RMSE}",
-    "\\caption*{Panel (a): $T_{0}=20$}",
     "\\label{5.2 Simulation}",
     lines_panel_a,
     "",
     "\\bigskip",
     "",
-    "\\caption*{Panel (b): $T_0= 50$}",
     lines_panel_b,
     "",
     "\\medskip",
@@ -536,10 +535,8 @@ write_simulation_tables <- function(
     "\\end{table}"
   )
 
-  # Table 2（Coverage）
   table2_lines <- make_table2_lines(mc_res, method_proposed = "Proposed")
 
-  # ファイルに書き出し
   all_lines <- c(table1_lines, "", table2_lines)
   writeLines(all_lines, con = file)
 
@@ -548,8 +545,8 @@ write_simulation_tables <- function(
 
 write_simulation_tables(
   mc_res,
-  T1_val = 20,  # 必要なら変更
-  file   = "inst/tables/simulation_results.tex"
+  T1_val = 20,
+  file = "inst/tables/simulation_results.tex"
 )
 
 ```

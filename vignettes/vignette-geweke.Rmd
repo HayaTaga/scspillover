@@ -93,7 +93,7 @@ for (t in 1:T0) {
 }
 
 # --- prior ---
-a0 <- 3.0
+a0 <- 1.0
 b0 <- 1.0 # IG(a0, b0) prior for sigma2
 step_rho <- 0.05
 
@@ -173,13 +173,43 @@ write.csv(out$summary, "inst/tables/geweke_jdt_summary.csv", row.names = FALSE)
 
 ```{r}
 jdt_tbl <- out$summary
-knitr::kable(jdt_tbl, caption = "Appendix JDT summary (MC vs. SC path).")
+
+row_renamer <- c(
+  rho = "$\\rho$",
+  log_sigma2 = "$\\log(\\sigma^2)$",
+  yc_mean = "$\\bar{y}_c$",
+  log_yc_var = "$\\log(\\mathrm{Var}(y_c))$",
+  spatial_quadratic = "$h_{\\text{spatial}}$",
+  corr_y0_wyc = "$\\mathrm{Corr}(y_0, Wy)$",
+  beta_mean = "$\\bar{\\beta}$",
+  Eta_mean = "$\\bar{\\eta}$",
+  Gamma_mean = "$\\bar{\\Gamma}$"
+)
+
+jdt_tbl$g <- unname(ifelse(
+  jdt_tbl$g %in% names(row_renamer),
+  row_renamer[jdt_tbl$g],
+  jdt_tbl$g
+))
+
+colnames(jdt_tbl) <- c(
+  "Statistic $g$",
+  "Mean (iid)",
+  "Mean (MCMC)",
+  "SE (iid)",
+  "SE (MCMC)",
+  "$Z$",
+  "$p$-value"
+)
+
+knitr::kable(jdt_tbl, caption = "Summary of Joint Distribution Test Results")
 
 jdt_tex <- kableExtra::kable(
   jdt_tbl,
   format = "latex",
   booktabs = TRUE,
-  caption = "Appendix JDT summary (MC vs. SC path)."
+  escape = FALSE,
+  caption = "Summary of Joint Distribution Test Results"
 )
 cat(jdt_tex, file = "./inst/tables/geweke_jdt_summary.tex")
 ```

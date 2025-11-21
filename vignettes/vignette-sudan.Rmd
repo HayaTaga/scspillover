@@ -42,11 +42,11 @@ Rcpp::sourceCpp("src/20_mcmc.cpp")
 Rcpp::sourceCpp("src/40_geweke_latest.cpp")
 
 
-load("./data/sudan_secession_up.rda")
+load("./data/sudan_secession.rda")
 
-panel_df <- sudan_secession_up$panel
-w_vec <- sudan_secession_up$w
-W_mat <- sudan_secession_up$W
+panel_df <- sudan_secession$panel
+w_vec <- sudan_secession$w
+W_mat <- sudan_secession$W
 panel_df <- panel_df %>%
   mutate(
     treatment = ifelse((country == "Sudan") & (year >= 2011), 1, 0)
@@ -92,10 +92,10 @@ p <- diagnostics.scspill(
 print(p)
 
 ggsave(
-  filename = "inst/figures/fig_sudan_diag.pdf",
+  filename = "inst/figures/fig_sudan_diag.png",
   plot = p,
-  width = 6.8,
-  height = 4.5,
+  width = 12.0,
+  height = 6.0,
   dpi = 300,
 )
 
@@ -106,37 +106,27 @@ write.csv(diag_tab, "inst/tables/sudan_diag_table.csv", row.names = FALSE)
 
 digits_vec <- rep(3L, ncol(diag_tab))
 names(digits_vec) <- names(diag_tab)
-digits_vec[c("n")] <- 0L
+# digits_vec[c("n")] <- 0L
 digits_vec[c(
   "mean",
   "sd",
   "q025",
-  "q05",
   "q50",
-  "q95",
   "q975",
-  "mcse",
-  "act",
-  "rhat\\_split",
-  "geweke\\_z"
+  "ess",
+  "rhat\\_split"
 )] <- 4L
 digits_vec <- digits_vec[colnames(diag_tab)]
 
 col_labels <- c(
   parameter = "Parameter",
-  n = "$M$",
   mean = "Mean",
   sd = "SD",
-  q025 = "$q_{0.025}$",
-  q05 = "$q_{0.05}$",
-  q50 = "$q_{0.50}$",
-  q95 = "$q_{0.95}$",
-  q975 = "$q_{0.975}$",
+  q025 = "$2.5\\%$",
+  q50 = "$50\\%$",
+  q975 = "$97.5\\%$",
   ess = "ESS",
-  mcse = "MCSE",
-  act = "ACT",
-  rhat_split = "$\\hat{R}_{\\mathrm{split}}$",
-  geweke_z = "Geweke $Z$"
+  rhat_split = "$\\hat{R}$"
 )
 col_labels <- col_labels[colnames(diag_tab)]
 
@@ -144,7 +134,7 @@ latex_code <- kableExtra::kable(
   diag_tab,
   format = "latex",
   booktabs = TRUE,
-  escape = FALSE, # allow math in labels
+  escape = FALSE,
   digits = as.integer(digits_vec),
   col.names = unname(col_labels),
   caption = "MCMC Posterior Summary and Diagnostics (Sudan Split)",
@@ -156,6 +146,9 @@ cat(latex_code, file = "inst/tables/sudan_diag_table.tex")
 ```
 
 ```{r}
+print(round(fit$rho_hat, digits = 3))
+print(round(quantile(fit$rho_draws, probs = c(0.025, 0.975)), digits = 3))
+
 p_a <- plot_panel_outcomes(
   fit = fit,
   data = panel_df,
@@ -201,8 +194,8 @@ p_b
 ggsave(
   filename = "inst/figures/fig_sudan_panelB.pdf",
   plot = p_b,
-  width = 6.8,
-  height = 4.5,
+  width = 8,
+  height = 4,
   dpi = 300,
 )
 
@@ -218,10 +211,10 @@ annote_spill <- create_spillover_annotations(
 
 p_spill <- plot_spillover_panel(
   fit = fit,
-  main_title = "Estimates of the Spillover Effects of California Tobacco Tax",
   vline_at = 2011, # 垂直線
   annotations_df = annote_spill,
-  skip_year = 2011
+  skip_year = 2011,
+  main_title = ""
 )
 
 p_spill
@@ -229,8 +222,8 @@ p_spill
 ggsave(
   filename = "inst/figures/fig_sudan_panel_spillover.pdf",
   plot = p_spill,
-  width = 6.8,
-  height = 4.5,
+  width = 8,
+  height = 4,
   dpi = 300,
 )
 ```
@@ -283,20 +276,17 @@ Xc_pre <- panel_df %>%
 dim(Xc_pre) <- c(nrow(Xc_pre), ncol(Xc_pre), 1)
 
 alpha_hat <- colMeans(fit$alpha_draws)
-sds_Yc <- apply(Yc_pre_obs, 2, sd)
-sds_Yc[!is.finite(sds_Yc) | sds_Yc < 1e-8] <- 1
-alpha_hat_scaled <- alpha_hat / sds_Yc
 
 sens <- prior_sensitivity(
   Yc_obs = Yc_pre_obs,
   W_raw = W,
   w_raw = w,
-  alpha_hat_scaled = alpha_hat_scaled,
+  alpha_hat_scaled = alpha_hat,
   Xc_pre = Xc_pre,
   p = 0L,
   grid = grid,
-  M_burn = 50000L,
-  M_keep = 100000L
+  M_burn = 500000L,
+  M_keep = 1000000L
 )
 
 sens$theta_table
@@ -339,6 +329,7 @@ create_ppa_table <- function(ppc_results) {
     seq_along(obs_names),
     function(i) {
       stat_name <- obs_names[i]
+      colnames(sim_stats) <- gsub("\\\\", "", colnames(sim_stats))
       sim_col <- sim_stats[[stat_name]]
       obs_val <- obs_stats_vec[i]
 
@@ -367,13 +358,13 @@ ppc <- prior_predictive(
   Yc_obs = Yc_pre_obs,
   W_raw = W,
   w_raw = w,
-  alpha_hat_scaled = alpha_hat_scaled,
+  alpha_hat_scaled = alpha_hat,
   Xc_pre = Xc_pre,
   p = 0L,
-  a0 = 1,
+  a0 = 3,
   b0 = 1,
-  rho_support = c(-0.9, 0.9),
-  R = 200000
+  rho_support = c(-0.99, 0.99),
+  R = 100000
 )
 
 stat_names <- c(
@@ -444,37 +435,42 @@ gg <- ggplot(sim_long, aes(x = simulated_value)) +
     strip.text = element_text(face = "bold") # 各パネルのタイトル (e.g., "yc_mean")
   ) +
   labs(
-    title = "Prior Predictive Analysis (Sudan)",
     x = "Statistic Value",
     y = "Frequency"
   )
+
 print(gg)
 
 ggsave(
-  filename = "inst/figures/fig_sudan_prior_predictive.pdf",
+  filename = "inst/figures/fig_ca_prior_predictive.pdf",
   plot = gg,
-  width = 6.8,
-  height = 4.5,
+  width = 8.0,
+  height = 4.0,
   dpi = 300,
 )
 
 ppc_table <- create_ppa_table(ppc)
 
+rename_vec <- c(
+  yc_mean = "Mean",
+  log_yc_var = "log-Var",
+  spatial_quadratic = "Spatial Quad.",
+  corr_y0_wyc = "Corr($Y_0$, $w'Y$)",
+  ac1 = "AC(1)",
+  ac2 = "AC(2)",
+  pve_pc1 = "PVE(PC1)",
+  avg_skewness = "Skewness",
+  avg_kurtosis = "Kurtosis"
+)
+ppc_table$Statistic <- rename_vec[ppc_table$Statistic]
+ppc_table$Observed_Value_h_y_obs <- round(ppc_table$Observed_Value_h_y_obs, 3)
+ppc_table$P_Value_P_h_y_obs <- round(ppc_table$P_Value_P_h_y_obs, 3)
+
 print(ppc_table)
 
-write.csv(
-  ppc_table,
-  "inst/tables/sudan_ppa_summary_table.csv",
-  row.names = FALSE
-)
+write.csv(ppc_table, "inst/tables/ca_ppa_summary_table.csv", row.names = FALSE)
 
-latex_col_names <- c(
-  "Statistic $h(y)$",
-  "Observed $h(y^o)$",
-  "$P(h \\le h(y^o) | A)$"
-)
-
-# Create the table
+latex_col_names <- c("Statistic", "Observed", "$P(h \\leq h(y^{o}) | A)$")
 
 ppc_table <- ppc_table %>% mutate(Statistic = gsub("_", "\\\\_", Statistic))
 

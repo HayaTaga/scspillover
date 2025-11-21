@@ -247,6 +247,10 @@ plot_panel_outcomes <- function(
       color = guide_legend(order = 1),
       linetype = guide_legend(order = 1),
       fill = guide_legend(order = 2)
+    ) +
+    theme(
+      legend.text = element_text(size = 18),
+      legend.key.size = unit(1.2, "lines")
     )
 
   interpolation_layers <- list(
@@ -282,7 +286,7 @@ plot_panel_outcomes <- function(
 
   if (!is.null(save_path)) {
     dir.create(dirname(save_path), recursive = TRUE, showWarnings = FALSE)
-    ggplot2::ggsave(save_path, gg, width = 7.2, height = 3.6, dpi = 300)
+    ggplot2::ggsave(save_path, gg, width = 8, height = 4, dpi = 300)
   }
   gg
 }
@@ -401,7 +405,7 @@ plot_panel_effect <- function(
     } +
 
     theme_scspill_paper() +
-    labs(x = x_title, y = y_title, title = "(b) Treatment Effect Estimation") +
+    labs(x = x_title, y = y_title) +
     scale_x_continuous(breaks = xax$breaks, labels = xax$labels) +
     scale_color_manual(
       name = NULL,
@@ -421,6 +425,10 @@ plot_panel_effect <- function(
       color = guide_legend(order = 1, nrow = 1),
       linetype = guide_legend(order = 1),
       fill = guide_legend(order = 2, nrow = 1)
+    ) +
+    theme(
+      legend.text = element_text(size = 18),
+      legend.key.size = unit(1.2, "lines")
     )
 
   # 6. Add annotations (arrows and text)
@@ -604,7 +612,7 @@ plot_spillover_panel <- function(
     gg <- gg +
       geom_segment(
         data = annotations_df,
-        aes(x = time - 0.8, xend = time - 0.1, y = y-0.2, yend = y),
+        aes(x = time - 0.8, xend = time - 0.1, y = y - 0.2, yend = y),
         arrow = arrow(length = unit(0.08, "in")),
         inherit.aes = FALSE
       ) +
@@ -612,7 +620,7 @@ plot_spillover_panel <- function(
         data = annotations_df,
         aes(
           x = time - 1.0,
-          y = y-0.2,
+          y = y - 0.2,
           label = label,
           hjust = 1,
           vjust = vjust %||% 0.5
@@ -918,18 +926,16 @@ create_spillover_annotations <- function(
 }
 
 compute_scm_weights <- function(Y0_pre, Yc_pre) {
-   y  <- as.numeric(Y0_pre)
-  X  <- as.matrix(Yc_pre)
-  N  <- ncol(X)
-  
+  y <- as.numeric(Y0_pre)
+  X <- as.matrix(Yc_pre)
+  N <- ncol(X)
+
   # 目的関数: min ||X w - y||^2
-  E <- matrix(1, nrow = 1, ncol = N)    # E w = f  （和＝1）
+  E <- matrix(1, nrow = 1, ncol = N) # E w = f  （和＝1）
   f <- 1
-  G <- diag(N)                          # G w >= h （w >= 0）
+  G <- diag(N) # G w >= h （w >= 0）
   h <- rep(0, N)
-  
-  fit <- limSolve::lsei(A = X, B = y,
-                        E = E, F = f,
-                        G = G, H = h)
+
+  fit <- limSolve::lsei(A = X, B = y, E = E, F = f, G = G, H = h)
   as.numeric(fit$X)
 }

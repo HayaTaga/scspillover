@@ -5,7 +5,7 @@
   "Yc_post",
   "times_pre",
   "times_post",
-  "units" # units$control を内包
+  "units"
 )
 
 #' @keywords internal
@@ -57,7 +57,6 @@ new_scspill <- function(
   inputs,
   sar = NULL
 ) {
-  # 行列・ベクトルの型強制
   inputs$Yc_pre <- as.matrix(inputs$Yc_pre)
   storage.mode(inputs$Yc_pre) <- "double"
   inputs$Yc_post <- as.matrix(inputs$Yc_post)

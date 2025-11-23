@@ -28,7 +28,6 @@ run_mcmc_for_posterior <- function(
   thin = 1L, # thinning interval (1 = no thinning)
   seed = 123
 ) {
-  # --- basic checks
   stopifnot(is.matrix(Yc_obs))
   set.seed(seed)
 
@@ -36,7 +35,6 @@ run_mcmc_for_posterior <- function(
   N <- ncol(Yc_obs)
   K <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
 
-  # --- normalize (w | W) row-wise, consistent with the model
   W_use <- row_normalize(W)
   w_use <- as.numeric(w)
   wsum <- sum(w_use)
@@ -44,7 +42,6 @@ run_mcmc_for_posterior <- function(
     w_use <- w_use / wsum
   }
 
-  # --- ensure X is a 3D array (T0 x N x K), use empty array if K=0
   X_use <- if (is.null(Xc_pre)) {
     array(0, c(T0, N, 0L))
   } else {
@@ -52,7 +49,6 @@ run_mcmc_for_posterior <- function(
     Xc_pre
   }
 
-  # --- support for rho
   if (is.null(rho_support)) {
     bnd <- compute_bnd(W, c_stability = 0.95)
     rho_lo <- -bnd
@@ -63,7 +59,6 @@ run_mcmc_for_posterior <- function(
     rho_hi <- as.numeric(rho_support[2])
   }
 
-  # --- initialize state consistent with priors
   rinvgamma1 <- function(a, b) 1 / rgamma(1, shape = a, rate = b)
   state <- list(
     rho = as.numeric(runif(1, rho_lo, rho_hi)),
@@ -73,7 +68,6 @@ run_mcmc_for_posterior <- function(
     Gamma = if (p > 0) matrix(0, p, T0) else matrix(0, 0, T0)
   )
 
-  # --- burn-in: apply a single-step kernel with observed data fixed
   for (m in seq_len(M_burn)) {
     state <- scspill_one_step_cpp(
       Yc_data = Yc_obs,
@@ -94,7 +88,6 @@ run_mcmc_for_posterior <- function(
     )
   }
 
-  # --- keep: thinning-aware collection
   keep_indices <- seq_len(M_keep * thin)
   draws <- vector("list", length = M_keep)
   k <- 0L
@@ -122,7 +115,6 @@ run_mcmc_for_posterior <- function(
     }
   }
 
-  # --- summarize posterior (extend as needed for beta, Eta, Gamma)
   rho_vec <- vapply(draws, function(s) s$rho, numeric(1))
   s2_vec <- vapply(draws, function(s) s$sigma2, numeric(1))
 
@@ -134,7 +126,6 @@ run_mcmc_for_posterior <- function(
     q975 = c(unname(quantile(rho_vec, 0.975)), unname(quantile(s2_vec, 0.975)))
   )
 
-  # beta summary if present (vector of length K)
   if (K > 0) {
     B <- do.call(cbind, lapply(draws, `[[`, "beta")) # K x M_keep
     beta_summ <- data.frame(
@@ -246,7 +237,6 @@ simulate_Yc_forward_R <- function(
   N <- nrow(W_use)
   K <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
 
-  # Build A = W + w * alpha^T  (use tcrossprod for clarity)
   A <- W_use + tcrossprod(w_use, as.numeric(alpha_hat_scaled))
   I <- diag(N)
 
@@ -256,7 +246,6 @@ simulate_Yc_forward_R <- function(
   for (t in seq_len(T0)) {
     mu <- rep(0, N)
 
-    # Add X_t beta if present
     if (K > 0) {
       arr <- Xc_pre[t, , , drop = FALSE] # 1 x N x K
       Nloc <- dim(arr)[2]
@@ -357,14 +346,13 @@ ppc_stats <- function(Yc, Y0_pre, W_use, w_use) {
     Yd_t_centered[, -(1:2), drop = FALSE] *
       Yd_t_centered[, -((T0 - 1):T0), drop = FALSE]
   )
-  den_ac2 <- rowSums(Yd_t_centered * Yd_t_centered) # (ac1 と同じ)
+  den_ac2 <- rowSums(Yd_t_centered * Yd_t_centered)
   ac2 <- mean(num_ac2 / den_ac2, na.rm = TRUE)
 
   pve_pc1 <- NA_real_
   if (N > 1 && T0 > 1) {
     tryCatch(
       {
-        # ユニット間の共分散行列 (N x N) または T0 x N の PCA
         pca <- prcomp(Yc, center = TRUE, scale. = FALSE)
         eigs <- pca$sdev^2
         pve_pc1 <- eigs[1] / sum(eigs)
@@ -380,7 +368,6 @@ ppc_stats <- function(Yc, Y0_pre, W_use, w_use) {
   if (requireNamespace("e1071", quietly = TRUE)) {
     tryCatch(
       {
-        # 各ユニット (列) の歪度と尖度を計算
         avg_skew <- mean(
           apply(Yc, 2, e1071::skewness, na.rm = TRUE),
           na.rm = TRUE
@@ -398,7 +385,6 @@ ppc_stats <- function(Yc, Y0_pre, W_use, w_use) {
   }
 
   c(
-    # (既存の統計量)
     yc_mean = mean(yc),
     log_yc_var = log(var(yc) + 1e-12),
     spatial_quadratic = spatial_q,
@@ -408,8 +394,6 @@ ppc_stats <- function(Yc, Y0_pre, W_use, w_use) {
       NA_real_
     },
     ac1 = ac1,
-
-    # ★ (追加された統計量)
     ac2 = ac2,
     pve_pc1 = pve_pc1,
     avg_skewness = avg_skew,

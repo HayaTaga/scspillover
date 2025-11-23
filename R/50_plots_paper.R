@@ -32,7 +32,7 @@ theme_scspill_paper <- function() {
   } else {
     which(((times - min(times, na.rm = TRUE)) %% every) == 0)
   }
-  keep <- unique(c(1L, keep, length(times))) # 端は必ず残す
+  keep <- unique(c(1L, keep, length(times)))
   list(breaks = idx[keep], labels = times[keep])
 }
 
@@ -775,7 +775,6 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
     )
   )
 
-  # 結合
   cf_full <- rbind(df_pre, df_post)
 
   cf_full$.idx <- seq_len(nrow(cf_full))
@@ -930,10 +929,9 @@ compute_scm_weights <- function(Y0_pre, Yc_pre) {
   X <- as.matrix(Yc_pre)
   N <- ncol(X)
 
-  # 目的関数: min ||X w - y||^2
-  E <- matrix(1, nrow = 1, ncol = N) # E w = f  （和＝1）
+  E <- matrix(1, nrow = 1, ncol = N)
   f <- 1
-  G <- diag(N) # G w >= h （w >= 0）
+  G <- diag(N)
   h <- rep(0, N)
 
   fit <- limSolve::lsei(A = X, B = y, E = E, F = f, G = G, H = h)

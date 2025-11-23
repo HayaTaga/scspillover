@@ -12,7 +12,6 @@ scspill_prep_X <- function(
   stopifnot(all(c(unit_col, time_col, y_col) %in% names(data)))
 
   d <- data
-  # 内部表記統一
   names(d)[names(d) == unit_col] <- "unit"
   names(d)[names(d) == time_col] <- "time"
   if (y_col != "y") {
@@ -100,8 +99,7 @@ posterior_effects <- function(
   for (m in 1:M) {
     a <- as.matrix(alpha_draws[m, ])
     r <- rho_draws[m]
-    # Ainv <- solve(IN - r * (w %*% t(a) + W)) # (IN - r w a' - r W)^{-1}
-    A <- inverse_check(IN, r, w, a, W) # 固有値半径をもとに r を安全化し、A を組み立て
+    A <- inverse_check(IN, r, w, a, W)
     Ainv <- robust_solve(A)
     B <- (IN - r * W)
     for (t in 1:T1) {
@@ -155,7 +153,6 @@ robust_solve <- function(
   lam <- 0
   for (k in 0:max_tries) {
     Areg <- if (lam == 0) A else A + lam * I
-    # rcond/kappa の評価（失敗時は次へ）
     ok <- tryCatch(
       {
         rc <- 1 / kappa(Areg, exact = FALSE)
@@ -268,7 +265,6 @@ scm_counterfactual_light <- function(
   dtr <- dtr[order(dtr[[time_col]]), ]
   t0_end <- min(dtr[dtr[[treatment_dummy]] == 1, time_col]) - 1
 
-  # グリッド
   t_all <- sort(unique(df[[time_col]]))
   pre_t <- t_all[t_all <= t0_end]
   post_t <- t_all[t_all > t0_end]

@@ -381,7 +381,7 @@ ppc <- prior_predictive(
   a0 = 3,
   b0 = 1,
   rho_support = c(-0.99, 0.99),
-  R = 100
+  R = 100000
 )
 
 stat_names <- c(

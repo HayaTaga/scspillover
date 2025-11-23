@@ -237,13 +237,11 @@ tidy_scspill <- function(fit, time_col = NULL) {
   T1 <- length(y0_post)
   T <- T0 + T1
 
-  # post の time（spill でも使う）
   times_post <- .get_times_post(fit, time_col)
   if (length(times_post) != T1) {
     times_post <- .safe_seq(T1, if (T0 > 0) T0 + 1L else 1L)
   }
 
-  # コントロール名（spill の列名補完に使う）
   unit_names <- NULL
   if (!is.null(fit$inputs$units) && is.list(fit$inputs$units)) {
     unit_names <- as.character(fit$inputs$units$control)
@@ -257,7 +255,6 @@ tidy_scspill <- function(fit, time_col = NULL) {
     if (ncol(A) > 0) {
       alpha_hat <- colMeans(A, na.rm = TRUE)
       units <- .get_units_control(fit, length(alpha_hat))
-      # ここで必ず numeric に落とす
       weights_df <- data.frame(
         unit = as.character(units),
         alpha = as.numeric(alpha_hat),
@@ -266,7 +263,6 @@ tidy_scspill <- function(fit, time_col = NULL) {
     }
   }
 
-  # spill をロング化
   spill_df <- data.frame()
   if (!is.null(fit$effects) && !is.null(fit$effects$spill)) {
     spill_df <- .standardize_spill(fit$effects$spill, times_post, unit_names)
@@ -286,15 +282,15 @@ tidy_scspill <- function(fit, time_col = NULL) {
 
 # ---------------- S3: plot.scspill ----------------
 
-#' scspill の可視化
+#' Plot scspill object
 #'
-#' @param x scspill オブジェクト
-#' @param type "full"（既定: 実測vs反事実, 前後一括）, "effect"（postの効果推移）,
+#' @param x scspill object
+#' @param type "full" (default: observed vs counterfactual, pre/post), "effect" (post treatment effect),
 #'             "spill_top", "weights", "rho", "beta", "trace"
-#' @param top_n spill_top の表示ユニット数
-#' @param cred  信用水準（反事実リボン）
-#' @param time_col data_pre / data_post にある横軸列名（例 "year"）
-#' @param ...   予備
+#' @param top_n number of units to display for spill_top
+#' @param cred  credibility level (for counterfactual ribbon)
+#' @param time_col column name for x-axis in data_pre / data_post (e.g., "year")
+#' @param ...    additional arguments
 #' @export
 plot.scspill <- function(
   x,
@@ -310,7 +306,6 @@ plot.scspill <- function(
   if (type == "full") {
     cf <- scspill_counterfactual(x, cred = cred, time_col = time_col)
 
-    # 連番 index（pre→post で単調増加。線は idx で結び、ラベルは time）
     cf$.idx <- seq_len(nrow(cf))
     T0 <- sum(cf$period == "pre")
 
@@ -337,21 +332,17 @@ plot.scspill <- function(
       series = "Counterfactual"
     )
 
-    # リボン用
     rib_pre <- transform(df_pre, idx = .idx)
     rib_post <- transform(df_post, idx = .idx)
 
-    # x 軸（ラベルは time）
     x_breaks <- cf$.idx
     x_labels <- cf$time
 
     gg <- ggplot2::ggplot() +
-      # 観測
       ggplot2::geom_line(
         data = obs_line,
         ggplot2::aes(idx, y, linetype = series, color = series)
       ) +
-      # CF リボン（pre / post）
       ggplot2::geom_ribbon(
         data = rib_pre,
         ggplot2::aes(
@@ -382,7 +373,6 @@ plot.scspill <- function(
         data = cf_line_post,
         ggplot2::aes(idx, y, linetype = series, color = series)
       ) +
-      # 介入境界（pre の最後）
       ggplot2::geom_vline(xintercept = T0, linetype = 3) +
       ggplot2::theme_minimal() +
       ggplot2::labs(
@@ -391,7 +381,6 @@ plot.scspill <- function(
         title = "Observed vs Counterfactual (pre & post)"
       ) +
       ggplot2::scale_x_continuous(breaks = x_breaks, labels = x_labels) +
-      # 凡例：上・横並び（線種で区別、色は見た目だけ・凡例非表示）
       ggplot2::scale_linetype_manual(
         values = c("Observed" = "solid", "Counterfactual" = "22"),
         name = NULL
@@ -419,22 +408,16 @@ plot.scspill <- function(
     return(gg)
   }
 
-  # 以降は tidy 済みオブジェクトを利用
   td <- tidy_scspill(x, time_col = time_col)
 
-  # -------- effect: post の処置効果 --------
   if (type == "effect") {
-    
-    # CFを計算（"full" と同じロジック）
     cf <- scspill_counterfactual(x, cred = cred, time_col = time_col)
-    
-    # 介入後 (post) のみ抽出
     df_post <- subset(cf, period == "post")
     
     df <- data.frame(
         time = df_post$time,
         mean = df_post$y_obs - df_post$y_cf_mean,
-        lo = df_post$y_obs - df_post$y_cf_hi, # 観測値 - CFの上限 = 効果の下限
+        lo = df_post$y_obs - df_post$y_cf_hi,
         hi = df_post$y_obs - df_post$y_cf_lo
     )
     
@@ -444,24 +427,21 @@ plot.scspill <- function(
                ggplot2::ggtitle("No post-treatment data found."))
     }
 
-    # 連続 index（ラベルは time）
     df$.idx <- seq_len(nrow(df))
     
     gg <- ggplot2::ggplot(df, ggplot2::aes(.idx, mean)) +
       ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi), alpha = 0.20) +
-      # ゼロラインを追加
       ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
       ggplot2::geom_line() +
       ggplot2::theme_minimal() +
       ggplot2::labs(
         x = "Time (post)",
-        y = "Treatment effect (Observed - Counterfactual)", # Y軸ラベルを明確化
+        y = "Treatment effect (Observed - Counterfactual)",
         title = "Estimated treatment effect (post)"
       ) +
       ggplot2::scale_x_continuous(breaks = df$.idx, labels = df$time)
     return(gg)
   }
-  # -------- spill_top: 上位ユニットのスピル --------
   if (type == "spill_top") {
     df <- td$spill 
 
@@ -511,7 +491,6 @@ plot.scspill <- function(
       stop("weights (alpha posterior summary) not found. Check fit$alpha_draws.")
     }
 
-    # 念のため型を保証（ここで numeric に）
     df$unit <- as.character(df$unit)
     df$alpha <- suppressWarnings(as.numeric(df$alpha))
     df <- df[!is.na(df$alpha), , drop = FALSE]
@@ -534,7 +513,6 @@ plot.scspill <- function(
     return(gg)
   }
 
-  # -------- rho: 事後分布のヒスト --------
   if (type == "rho") {
     df <- data.frame(rho = x$rho_draws)
     gg <- ggplot2::ggplot(df, ggplot2::aes(rho)) +
@@ -549,7 +527,6 @@ plot.scspill <- function(
     return(gg)
   }
 
-  # -------- beta: 係数の要約 --------
   if (type == "beta") {
     if (is.null(x$sar$beta)) {
       stop("beta draws are not available in `x$sar$beta`.")
@@ -577,7 +554,6 @@ plot.scspill <- function(
     return(gg)
   }
 
-  # -------- trace: rho のトレース --------
   if (type == "trace") {
     df <- data.frame(iter = seq_along(x$rho_draws), rho = x$rho_draws)
     gg <- ggplot2::ggplot(df, ggplot2::aes(iter, rho)) +
@@ -594,16 +570,11 @@ plot.scspill <- function(
   stop("Unknown type")
 }
 
-# ---------------- S3: autoplot.scspill（ggplot2 流の呼び出し） ----------------
-
 #' @export
 #' @method autoplot scspill
 autoplot.scspill <- function(object, ...) {
   plot.scspill(object, ...)
 }
-
-# ---------------- S3: pp_check.scspill（簡易） ----------------
-# ・rho の収束と、post 末期における treated effect の分布近似を提示
 
 #' @export
 #' @method pp_check scspill
@@ -621,7 +592,6 @@ pp_check.scspill <- function(object, what = c("rho_trace", "treat_last_dist")) {
       )
     return(gg)
   } else {
-    # treat の最後の点を正規近似
     td <- tidy_scspill(object)
     if (nrow(td$treat) == 0) {
       stop("No treatment-effect summary found.")

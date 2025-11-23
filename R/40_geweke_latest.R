@@ -1,6 +1,3 @@
-# 40_geweke_full.R
-
-# --- 前処理ユーティリティ ---
 #' Row-normalize a spatial weights matrix W
 #'
 #' Ensures that the sum of each row is 1.
@@ -78,12 +75,10 @@ default_g_fn <- function(theta, Yc, Y0_pre, W_use, w_use) {
   c(
     rho = unname(theta$rho),
     log_sigma2 = log(pmax(theta$sigma2, 1e-12)),
-
     yc_mean = mean(yc_vec),
     log_yc_var = log(pmax(stats::var(yc_vec), 1e-12)),
     spatial_quadratic = spatial_q,
     corr_y0_wyc = corr_y0_wyc,
-
     beta_mean = beta_mean,
     Eta_mean = Eta_mean,
     Gamma_mean = Gamma_mean
@@ -92,16 +87,15 @@ default_g_fn <- function(theta, Yc, Y0_pre, W_use, w_use) {
 
 #' @keywords internal
 draw_initial_state <- function(
-  T0,
-  N,
-  K,
-  p,
-  a0,
-  b0,
-  W_use,
-  w_use,
-  alpha_hat_scaled
-) {
+    T0,
+    N,
+    K,
+    p,
+    a0,
+    b0,
+    W_use,
+    w_use,
+    alpha_hat_scaled) {
   bnd <- compute_bnd(W_use, w_use, alpha_hat_scaled)
   rho0 <- stats::runif(1, -bnd, bnd)
   sigma2_0 <- 1 / stats::rgamma(1, shape = a0, rate = b0)
@@ -125,7 +119,6 @@ draw_initial_state <- function(
   )
 }
 
-# --- バッチ平均分散（MCMC側 SE） ---
 #' @keywords internal
 var_mcmc_batchmeans <- function(x, b = NULL) {
   x <- x[is.finite(x)]
@@ -144,33 +137,30 @@ var_mcmc_batchmeans <- function(x, b = NULL) {
   list(var_mean = as.numeric(tau2) / (a * b))
 }
 
-# --- Geweke JDT 本体（完全版） ---
 #' @keywords internal
 geweke_jdt_full <- function(
-  Y0_pre,
-  Yc_pre_like_dims, # c(T0, N)
-  W,
-  w,
-  alpha_hat_scaled, # N
-  Xc_pre = NULL, # T0 x N x K array or NULL
-  p = 0L,
-  M1 = 20000L,
-  M2 = 20000L,
-  burn_in = 5000L,
-  a0 = 1.0,
-  b0 = 1.0,
-  step_rho = 0.05,
-  g_fn = default_g_fn,
-  batch_size = NULL,
-  verbose = TRUE,
-  rho_support = NULL
-) {
+    Y0_pre,
+    Yc_pre_like_dims, # c(T0, N)
+    W,
+    w,
+    alpha_hat_scaled, # N
+    Xc_pre = NULL, # T0 x N x K array or NULL
+    p = 0L,
+    M1 = 20000L,
+    M2 = 20000L,
+    burn_in = 5000L,
+    a0 = 1.0,
+    b0 = 1.0,
+    step_rho = 0.05,
+    g_fn = default_g_fn,
+    batch_size = NULL,
+    verbose = TRUE,
+    rho_support = NULL) {
   stopifnot(is.numeric(Y0_pre))
   T0 <- length(Y0_pre)
   N <- Yc_pre_like_dims[2]
   K <- if (is.null(Xc_pre)) 0L else dim(Xc_pre)[3]
 
-  # 正規化（行ごとに w|W を同時に）
   W_use <- row_normalize(W)
   w_use <- as.numeric(w)
   wsum <- sum(w_use)
@@ -183,7 +173,7 @@ geweke_jdt_full <- function(
     r <- max(Mod(ev))
     if (!is.finite(r) || r <= 0) {
       return(0.95)
-    } # フォールバック
+    }
     0.95 / r
   }
   if (is.null(rho_support)) {
@@ -322,7 +312,6 @@ geweke_jdt_full <- function(
     g_mcmc_mat[m, ] <- g_fn(state, Yc_draw, Y0_pre, W_use, w_use)
   }
 
-  # ---------- 統計量 ----------
   mean_iid <- colMeans(g_iid_mat, na.rm = TRUE)
   mean_mcmc <- colMeans(g_mcmc_mat, na.rm = TRUE)
 

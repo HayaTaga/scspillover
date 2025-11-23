@@ -177,7 +177,6 @@ diagnostics.scspill <- function(
         stop("'which_alpha' indices out of range.")
       }
     } else {
-      # 後方互換：上位抽出
       ah <- tryCatch(as.numeric(object$alpha_hat), error = function(e) NULL)
       if (is.null(ah)) {
         ah <- colMeans(object$alpha_draws)

@@ -22,7 +22,6 @@ sc_spillover <- function(
     y <- as.character(substitute(y))
   }
 
-  # 必須列チェック
   required_cols <- c(unit_col, time_col, y, treatment_dummy)
   if (!all(required_cols %in% names(data))) {
     stop(sprintf(
@@ -40,7 +39,6 @@ sc_spillover <- function(
   t_start <- min(treat_series[[time_col]][treat_series[[treatment_dummy]] == 1])
   T0 <- if (is.null(T0)) sum(times < t_start) else as.integer(T0)
 
-  # 整形 (Y0_pre, Yc_pre, ...) を得る
   prep <- scspill_prep_X(
     data,
     treated_unit = treated_unit,

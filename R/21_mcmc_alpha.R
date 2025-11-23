@@ -13,7 +13,6 @@ hs_alpha_gibbs <- function(y, X, M = 2000, burn = 1000, verbose = TRUE) {
   # chains_list: list of matrices (draws x dim), same number of rows preferred
   m <- length(chains_list)
   stopifnot(m >= 2)
-  # そろえる（最短長に切り詰め）
   n <- min(vapply(chains_list, nrow, 1L))
   chains <- lapply(chains_list, function(a) a[seq_len(n), , drop = FALSE])
 
@@ -44,7 +43,6 @@ hs_alpha_gibbs <- function(y, X, M = 2000, burn = 1000, verbose = TRUE) {
   out
 }
 
-#--- メイン：複数チェーンで α を推定 ---
 #' @keywords internal
 run_alpha_step1 <- function(
   Y0_pre,
@@ -76,14 +74,12 @@ run_alpha_step1 <- function(
       iteration = iter,
       burn = burn,
       verbose = verbose
-    ) # (iter-burn) x N
+    )
   }
 
-  # α̂（全チェーン連結後の事後平均）
   draws_all <- do.call(rbind, chain_draws)
   alpha_hat <- colMeans(draws_all)
 
-  # 診断（Rhat）
   rhat <- .rhat_split_vec(chain_draws)
   diag_tab <- data.frame(
     param = paste0("alpha[", seq_len(N), "]"),

@@ -8,7 +8,6 @@
 }
 
 #' @keywords internal
-# rook 型の隣接行列（行標準化）
 rook_W <- function(nrow, ncol, normalize = FALSE) {
   N <- nrow * ncol
   nb <- matrix(0, N, N)
@@ -174,7 +173,6 @@ scspill_sim_dgp <- function(
     Yc1_post[tt, ] <- as.numeric(A_post_inv %*% rhs)
   }
 
-  # 出力
   Yc_pre <- Yc0_all[1:T0, , drop = FALSE]
   Y0_pre <- Y00_all[1:T0]
   Yc_post <- Yc1_post
@@ -188,9 +186,6 @@ scspill_sim_dgp <- function(
 
   vec_Xc_pre <- if (K > 0) as.numeric(aperm(X_pre, c(1, 2, 3))) else NULL
   vec_Xc_post <- if (K > 0) as.numeric(aperm(X_post, c(1, 2, 3))) else NULL
-
-  # print(A_pre_inv)
-  # print(A_post_inv)
 
   list(
     data = list(
@@ -229,7 +224,7 @@ run_one_sim <- function(
     dgp_args = NULL,
     M = 2000,
     burn = 1000,
-    step_rho = 0.02, # C++ 側の引数に合わせて残置（Stan は使いません）
+    step_rho = 0.02,
     seed = NULL) {
   if (is.null(dgp)) {
     if (is.null(dgp_args)) {
@@ -266,12 +261,10 @@ run_one_sim <- function(
   Y0_post <- dgp$data$Y0_post
   Yc_post <- dgp$data$Yc_post
 
-  # 真の効果
   y0_cf_true <- dgp$truth$y0_cf_post
   te_true <- Y0_post - y0_cf_true
   ate_true <- mean(te_true)
 
-  # --- SCM（点推定）---
   alpha_scm <- .scM_qp(Y0_pre, Yc_pre)
   ycf_scm <- as.numeric(Yc_post %*% alpha_scm)
   te_scm <- Y0_post - ycf_scm
@@ -305,10 +298,9 @@ run_one_sim <- function(
 
   alpha_hat_bscm <- colMeans(alpha_draws_bscm)
 
-  # --- SCSPILL（C++ サンプラの α・ρ を共同で使用）---
   sar <- sar_full_sampler_cpp_step2(
     Yc_pre = Yc_pre,
-    alpha_hat_in = alpha_hat_bscm, # ★ Step 1 の alpha_hat を渡す
+    alpha_hat_in = alpha_hat_bscm,
     Xc_pre_ = if (K > 0) dgp$data$Xc_pre else NULL,
     T0 = T0,
     N = N,
@@ -347,8 +339,7 @@ run_one_sim <- function(
     te_spill_mat[, s] <- (Y0_post - ycf_m)
   }
 
-  # 1) 各時点の事後平均（推定量）と 95% CI、被覆
-  te_spill_mean <- rowMeans(te_spill_mat) # 事後平均（時点別推定量）
+  te_spill_mean <- rowMeans(te_spill_mat)
   te_spill_ci <- t(apply(
     te_spill_mat,
     1,
@@ -361,12 +352,6 @@ run_one_sim <- function(
       te_true <= te_spill_ci[, "upper"]
   )
   cover_pt_spill <- mean(cover_pt_spill_vec)
-  # print(te_true)
-  # print("--------")
-  # print(te_spill_ci)
-  # print("================")
-
-  # 2) ATE posterior (average over draws, then CI/coverage from distribution)
   ate_spill_draws <- colMeans(te_spill_mat)
   ate_spill_mean <- mean(ate_spill_draws)
   ci_ate_spill <- stats::quantile(
@@ -379,7 +364,6 @@ run_one_sim <- function(
       mean(te_true) <= ci_ate_spill[2]
   )
 
-  # 3) MSE/Bias at each time point (Python: te_true - mean)
   mse_spill_time <- (te_true - te_spill_mean)^2
   bias_spill_time <- (te_true - te_spill_mean)
 
@@ -471,7 +455,7 @@ run_one_sim <- function(
       alpha_bscm = alpha_draws_bscm,
       scspill_step2 = list(alpha_hat = alpha_hat_bscm, rho = rho_draws_step2),
       ate = list(bscm = ate_bscm_draws, scspill = ate_spill_draws),
-      te_path = list(bscm = te_bscm_mat, scspill = te_spill_mat) # フル行列も保持
+      te_path = list(bscm = te_bscm_mat, scspill = te_spill_mat)
     ),
     per_time = list(
       mean = per_time_mean,

@@ -33,7 +33,6 @@ sar_gibbs_sampler <- function(
       stop("Xc_pre dims mismatch.")
     }
     K <- dim(Xc_pre)[3]
-    # C++ 側は (t*N + i)*K + k の一次元ベクトルとして受け取る
     Xvec <- as.numeric(aperm(Xc_pre, c(1, 2, 3)))
   } else {
     K <- 0L
@@ -76,7 +75,7 @@ sar_gibbs_sampler <- function(
 
 #' @keywords internal
 .rhat_basic <- function(ch_list_num) {
-  # ch_list_num: list of numeric vectors（各チェーンの draws）
+  # ch_list_num: list of numeric vectors (draws for each chain)
   m <- length(ch_list_num)
   stopifnot(m >= 2)
   n <- min(vapply(ch_list_num, length, 1L))
@@ -103,7 +102,7 @@ run_sar_step2 <- function(
   alpha_hat,
   W,
   w,
-  Xc_pre = NULL, # array(T0, N, K) を (T0*N*K) のベクトルにフラットして渡す場合はそのまま
+  Xc_pre = NULL,
   K = 0,
   p = 0,
   iter = 20000,

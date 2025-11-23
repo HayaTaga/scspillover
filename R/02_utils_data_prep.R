@@ -9,13 +9,11 @@ scspill_prep <- function(data, treated_unit, T0) {
   times <- sort(unique(d$time))
   N <- length(controls)
 
-  # matrices: rows=time, cols=units
   Ywide <- reshape(d[, c("time", "unit", "y")], direction = "wide",
                    idvar = "time", timevar = "unit")
   Ywide <- Ywide[order(Ywide$time), ]
   Y <- as.matrix(Ywide[,-1])
   colnames(Y) <- sub("y\\.", "", colnames(Y))
-  # column index
   idx0 <- which(colnames(Y) == as.character(treated_unit))
   idxc <- setdiff(seq_len(ncol(Y)), idx0)
 

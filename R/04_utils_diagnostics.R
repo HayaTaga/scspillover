@@ -1,11 +1,11 @@
 #' scspill: Diagnostics (trace plots, multi-parameter)
 #'
-#' @param object scspill オブジェクト
-#' @param what   現状 "trace" のみ
-#' @param which_alpha  "all" で全 alpha、文字ベクトル/整数ベクトルで列指定、NULL なら "all"
-#' @param top_n_alpha  which_alpha が NULL でも "all" 以外を明示したい場合の上位抽出数
-#' @param which_beta   "all" で全 beta、文字ベクトル/整数ベクトルで列指定、NULL なら "all"
-#' @param top_n_beta   which_beta が NULL でも "all" 以外を明示したい場合の上位抽出数
+#' @param object scspill object
+#' @param what   currently only "trace"
+#' @param which_alpha  "all" for all alpha, character/integer vector for column selection, NULL defaults to "all"
+#' @param top_n_alpha  number of top units to extract when which_alpha is NULL
+#' @param which_beta   "all" for all beta, character/integer vector for column selection, NULL defaults to "all"
+#' @param top_n_beta   number of top units to extract when which_beta is NULL
 #' @export
 diagnostics.scspill <- function(
   object,

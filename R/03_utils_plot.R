@@ -1,5 +1,3 @@
-# ---------------- 共通ユーティリティ ----------------
-
 `%||%` <- function(x, y) if (!is.null(x)) x else y
 
 .as_num <- function(x) {
@@ -33,9 +31,7 @@
   paste0("unit_", seq_len(n_cols))
 }
 
-# ----------------------- times 取得（time_col 対応） -----------------------
 .get_times_pre <- function(fit, time_col = NULL) {
-  # data_pre の列を最優先
   if (
     !is.null(time_col) &&
       !is.null(fit$inputs$data_pre) &&
@@ -44,7 +40,6 @@
   ) {
     return(as.vector(fit$inputs$data_pre[[time_col]]))
   }
-  # 既存フィールド
   if (!is.null(fit$inputs$times_pre)) {
     return(as.vector(fit$inputs$times_pre))
   }
@@ -84,14 +79,12 @@
 .standardize_spill <- function(spill_raw, times_post, unit_names = NULL) {
   if (is.null(spill_raw)) {
     return(data.frame())
-  } # なし
+  }
 
-  # list(mean=matrix, ...) も扱う
   if (is.list(spill_raw) && !"data.frame" %in% class(spill_raw)) {
     if (!is.null(spill_raw$mean)) spill_raw <- spill_raw$mean
   }
 
-  # case 1: すでにロング（unit/time/mean を持つ）
   if (
     is.data.frame(spill_raw) &&
       all(c("unit", "time", "mean") %in% names(spill_raw))
@@ -108,7 +101,6 @@
     return(df)
   }
 
-  # case 2: 行列・ワイド（列＝ユニット）
   if (
     is.matrix(spill_raw) ||
       (is.data.frame(spill_raw) && !("unit" %in% names(spill_raw)))
@@ -118,12 +110,10 @@
     U <- ncol(M)
     if (U <= 1) {
       return(data.frame())
-    } # ユニット別がない場合は空で返す
-    # time
+    }
     if (length(times_post) != T1) {
       times_post <- .safe_seq(T1, 1L)
     }
-    # unit 名
     coln <- colnames(M)
     if (is.null(coln) || any(coln == "")) {
       if (!is.null(unit_names)) {
@@ -132,7 +122,6 @@
         coln <- paste0("unit_", seq_len(U))
       }
     }
-    # ロングへ（列優先ベクトル化に合わせて rep の向きに注意）
     df <- data.frame(
       time = rep(times_post, times = U),
       unit = rep(coln, each = T1),
@@ -145,16 +134,9 @@
     return(df)
   }
 
-  # それ以外は扱えない
   data.frame()
 }
 
-# -------------- counterfactual（事後平均/区間を計算） ----------------
-#   Ainv = (I_N - r (w a' + W))^{-1}
-#   tmp  = Ainv { (I_N - r W) y_c - r w y0 }
-#   effect = y0 - a' tmp  =>  counterfactual = a' tmp
-#
-# 返り値: data.frame(time, t_idx, period, y_obs, y_cf_mean, y_cf_lo, y_cf_hi)
 #' @keywords internal
 scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
   stopifnot(inherits(fit, "scspill"))
@@ -181,7 +163,6 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
 
   IN <- diag(N)
 
-  # 時間軸（指定があれば data_* の列を使う）
   times_pre <- .get_times_pre(fit, time_col)
   if (length(times_pre) != T0) {
     times_pre <- .safe_seq(T0, 1L)
@@ -245,8 +226,6 @@ scspill_counterfactual <- function(fit, cred = 0.95, time_col = NULL) {
   rbind(df_pre, df_post)
 }
 
-# ---------------- tidy 化（効果・スピル・重み等を取り出し） ----------------
-# 既存の fit$effects / fit$weights があればそれを尊重。無ければ最小限を再構成。
 #' @keywords internal
 tidy_scspill <- function(fit, time_col = NULL) {
   y0_pre <- as.numeric(fit$inputs$Y0_pre)
@@ -338,7 +317,6 @@ plot.scspill <- function(
     df_pre <- subset(cf, period == "pre")
     df_post <- subset(cf, period == "post")
 
-    # CF 線を介入年（pre 最終点）から連続させる
     if (nrow(df_pre) > 0 && nrow(df_post) > 0) {
       pre_last <- df_pre[nrow(df_pre), ]
       pre_last$period <- "post"
@@ -347,7 +325,6 @@ plot.scspill <- function(
       df_post_line <- df_post
     }
 
-    # 線データ（描画は .idx、ラベルは time）
     obs_line <- data.frame(idx = cf$.idx, y = cf$y_obs, series = "Observed")
     cf_line_pre <- data.frame(
       idx = df_pre$.idx,
@@ -397,7 +374,6 @@ plot.scspill <- function(
         alpha = 0.18,
         show.legend = TRUE
       ) +
-      # CF 線（介入年から連続）
       ggplot2::geom_line(
         data = cf_line_pre,
         ggplot2::aes(idx, y, linetype = series, color = series)
@@ -455,18 +431,15 @@ plot.scspill <- function(
     # 介入後 (post) のみ抽出
     df_post <- subset(cf, period == "post")
     
-    # 処置効果 (Effect = Observed - Counterfactual) を計算
-    # 信用区間は (Obs - CF_hi, Obs - CF_lo) となる
     df <- data.frame(
         time = df_post$time,
         mean = df_post$y_obs - df_post$y_cf_mean,
         lo = df_post$y_obs - df_post$y_cf_hi, # 観測値 - CFの上限 = 効果の下限
-        hi = df_post$y_obs - df_post$y_cf_lo  # 観測値 - CFの下限 = 効果の上限
+        hi = df_post$y_obs - df_post$y_cf_lo
     )
     
-    # エラー回避: 介入後データがない場合は空のプロットを返す
     if (nrow(df) == 0) {
-        warning("`type = 'effect'` が呼び出されましたが、介入後のデータ (post) が見つかりません。")
+        warning("No post-treatment data found for type='effect'.")
         return(ggplot2::ggplot() + ggplot2::theme_void() + 
                ggplot2::ggtitle("No post-treatment data found."))
     }
@@ -493,10 +466,7 @@ plot.scspill <- function(
     df <- td$spill 
 
     if (!nrow(df)) {
-      stop(
-        "`effects$spill` にユニット別のスピル系列が見つかりません（単一系列か未保存の可能性）。\n",
-        "各ユニット列を持つ行列/データフレーム、または (unit,time,mean) のロング形式を入れてください。"
-      )
+      stop("effects$spill not found or not in unit-by-time format.")
     }
 
     df$unit <- as.character(df$unit)
@@ -538,9 +508,7 @@ plot.scspill <- function(
     df <- td$weights
 
     if (!nrow(df)) {
-      stop(
-        "weights（alpha の事後要約）が見つかりません。`fit$alpha_draws` が空でないか確認してください。"
-      )
+      stop("weights (alpha posterior summary) not found. Check fit$alpha_draws.")
     }
 
     # 念のため型を保証（ここで numeric に）

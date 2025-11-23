@@ -9,7 +9,6 @@
 )
 
 #' @keywords internal
-# バリデーション（不足なら即エラー）
 validate_scspill <- function(x) {
   stopifnot(is.list(x), inherits(x, "scspill"))
 
@@ -24,7 +23,6 @@ validate_scspill <- function(x) {
     stop("scspill object is missing inputs$units$control")
   }
 
-  # 形状・型
   T0 <- nrow(as.matrix(x$inputs$Yc_pre))
   T1 <- nrow(as.matrix(x$inputs$Yc_post))
   Np <- ncol(as.matrix(x$inputs$Yc_pre))
@@ -50,7 +48,6 @@ validate_scspill <- function(x) {
 }
 
 #' @keywords internal
-# コンストラクタ：必須フィールドを強制的に埋め、型を揃えて返す
 new_scspill <- function(
   alpha_draws,
   rho_draws,
@@ -68,7 +65,6 @@ new_scspill <- function(
   inputs$Y0_pre <- as.numeric(inputs$Y0_pre)
   inputs$Y0_post <- as.numeric(inputs$Y0_post)
 
-  # times_* を必ず用意（無ければ rownames → 連番）
   if (is.null(inputs$times_pre)) {
     T0 <- nrow(inputs$Yc_pre)
     inputs$times_pre <- if (!is.null(rownames(inputs$Yc_pre))) {
@@ -88,7 +84,6 @@ new_scspill <- function(
   inputs$times_pre <- as.vector(inputs$times_pre)
   inputs$times_post <- as.vector(inputs$times_post)
 
-  # units$control を必ず用意（列名優先）
   if (is.null(inputs$units) || is.null(inputs$units$control)) {
     u <- colnames(inputs$Yc_post)
     if (is.null(u)) {
@@ -104,7 +99,6 @@ new_scspill <- function(
     }
   }
 
-  # 空間情報（任意だが型を揃える）
   if (!is.null(inputs$w)) {
     inputs$w <- as.matrix(inputs$w)
   }

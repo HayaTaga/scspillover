@@ -9,9 +9,8 @@ hs_alpha_gibbs <- function(y, X, M = 2000, burn = 1000, verbose = TRUE) {
   list(alpha = draws)
 }
 
-#--- basic split-Rhat（各成分ごと） ---
 .rhat_split_vec <- function(chains_list) {
-  # chains_list: list of matrices (draws x dim), 同じ行数が望ましい
+  # chains_list: list of matrices (draws x dim), same number of rows preferred
   m <- length(chains_list)
   stopifnot(m >= 2)
   # そろえる（最短長に切り詰め）

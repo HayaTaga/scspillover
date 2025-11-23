@@ -26,13 +26,12 @@ sc_spillover <- function(
   required_cols <- c(unit_col, time_col, y, treatment_dummy)
   if (!all(required_cols %in% names(data))) {
     stop(sprintf(
-      "`data` に列 %s が必要です。",
+      "Required columns missing in data: %s",
       paste0(required_cols, collapse = ", ")
     ))
   }
   set.seed(seed)
 
-  # 介入開始期から T0 を決める
   times <- sort(unique(data[[time_col]]))
   treat_series <- data[
     data[[unit_col]] == treated_unit,
@@ -67,9 +66,6 @@ sc_spillover <- function(
   N <- ncol(Yc_pre)
   T1 <- nrow(Yc_post)
 
-  #--------------------------------------
-  # Step 1: BSCM による alpha の推定
-  #--------------------------------------
   if (verbose) {
     message("[Step 1] Sampling alpha via BSCM (horseshoe prior)...")
   }
@@ -83,14 +79,10 @@ sc_spillover <- function(
   colnames(alpha_draws) <- colnames(Yc_pre)
   alpha_hat <- colMeans(alpha_draws)
 
-  #--------------------------------------
-  # Step 2: α̂ 固定で rho 等を推定
-  #--------------------------------------
   if (verbose) {
     message("[Step 2] Sampling rho (and others) with fixed alpha_hat...")
   }
 
-  # X の整形
   K <- 0L
   Xvec <- NULL
   if (!is.null(Xc_pre)) {
@@ -102,7 +94,7 @@ sc_spillover <- function(
       Xvec <- as.numeric(Xc_pre)
       Ktmp <- length(Xvec) / (T0 * N)
       if (abs(Ktmp - round(Ktmp)) > 1e-8) {
-        stop("Xc_pre の次元が (T0*N*K) に整合しません。")
+        stop("Xc_pre dimensions do not match (T0*N*K).")
       }
       K <- as.integer(round(Ktmp))
     }
@@ -129,9 +121,6 @@ sc_spillover <- function(
   rho_draws <- as.numeric(sar$rho)
   rho_hat <- mean(rho_draws)
 
-  #--------------------------------------
-  # 事後効果（alpha_hat 固定、rho の不確実性のみ）
-  #--------------------------------------
   IN <- diag(N)
 
   cf_one_rho <- function(rho) {

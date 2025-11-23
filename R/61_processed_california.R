@@ -111,14 +111,14 @@ write_csv(W_sub_df, "data/processed/tobacco/adjacency_rook_panel.csv")
 W_no_ca_df <- W_no_ca %>%
   as.data.frame() %>%
   rownames_to_column(var = "state")
-write_csv(W_no_ca_df, "data/processed/tobacco/adjacency_rook_panel_no_CA.csv")
+write_csv(W_no_ca_df, "data/processed/tobacco/weight_mat.csv")
 
 # (c) California adjacency vector (matching W_no_ca column order)
 ca_vec_df <- tibble(
   state = names(ca_vec_no_ca),
   adj = as.numeric(ca_vec_no_ca)
 )
-write_csv(ca_vec_df, "data/processed/tobacco/california_adjacency_vector.csv")
+write_csv(ca_vec_df, "data/processed/tobacco/weight_vec.csv")
 
 # --------------------------------------------------------------
 # 6) Minimal diagnostics (printed)

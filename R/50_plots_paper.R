@@ -889,16 +889,16 @@ create_spillover_annotations <- function(
   df <- td$spill
 
   if (!nrow(df)) {
-    warning("create_spillover_annotations: fit$effects$spill が空です。")
+    warning("create_spillover_annotations: fit$effects$spill is empty.")
     return(data.frame())
   }
 
   df_at_time <- df[df$time == time_point, ]
   if (!nrow(df_at_time)) {
     warning(paste(
-      "指定された年",
+      "Data for year",
       time_point,
-      "のデータが spill データに見つかりません。"
+      "not found in spill data."
     ))
     return(data.frame())
   }

@@ -71,30 +71,25 @@ default_g_fn <- function(theta, Yc, Y0_pre, W_use, w_use) {
     NA_real_
   }
 
-  # パラメータ側の統計量
   beta_mean <- if (length(theta$beta) > 0) mean(theta$beta) else NA_real_
   Eta_mean <- if (length(theta$Eta) > 0) mean(theta$Eta) else NA_real_
   Gamma_mean <- if (length(theta$Gamma) > 0) mean(theta$Gamma) else NA_real_
 
   c(
-    # 既存
     rho = unname(theta$rho),
     log_sigma2 = log(pmax(theta$sigma2, 1e-12)),
 
-    # データ側の統計量
     yc_mean = mean(yc_vec),
     log_yc_var = log(pmax(stats::var(yc_vec), 1e-12)),
     spatial_quadratic = spatial_q,
     corr_y0_wyc = corr_y0_wyc,
 
-    # パラメータ側の統計量（追加）
     beta_mean = beta_mean,
     Eta_mean = Eta_mean,
     Gamma_mean = Gamma_mean
   )
 }
 
-# --- 事前からの初期値（MC/SC 共通の事前と整合） ---
 #' @keywords internal
 draw_initial_state <- function(
   T0,

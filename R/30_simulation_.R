@@ -44,13 +44,12 @@ make_w <- function(N, treated = 1L) {
 }
 
 .scspill_cf_post <- function(
-  Y0_post,
-  Yc_post,
-  W,
-  w,
-  alpha_hat,
-  rho_hat
-) {
+    Y0_post,
+    Yc_post,
+    W,
+    w,
+    alpha_hat,
+    rho_hat) {
   N <- length(alpha_hat)
   IN <- diag(N)
 
@@ -82,36 +81,28 @@ if (!requireNamespace("quadprog", quietly = TRUE)) {
   as.numeric(sol$solution)
 }
 
-# =========================================================
-# DGP (指示の4ステップで素直に生成)
-#   1) Yc^0_t = (I - ρW - wαᵀ)^{-1}(X_tβ + ε_t)
-#   2) Y0^0_t = αᵀ Yc^0_t     （perfect fit）
-#   3) Y0^1_t = Y0^0_t + τ_t,  τ_t ~ N(μ_τ, σ_τ^2)
-#   4) Yc^1_t = (I - ρW)^{-1}(w Y0^1_t + X_tβ + ε_t)
-# =========================================================
 #' @keywords internal
 scspill_sim_dgp <- function(
-  T0,
-  T1,
-  N,
-  W,
-  w,
-  rho,
-  sigma2,
-  alpha, # 長さN（合成重みの真値）
-  K = 0,
-  beta = NULL, # K=0ならbetaはNULLでOK
-  seed = NULL,
-  mu_tau = 1.0,
-  sd_tau = 1.0
-) {
+    T0,
+    T1,
+    N,
+    W,
+    w,
+    rho,
+    sigma2,
+    alpha, # length N (true synthetic weights)
+    K = 0,
+    beta = NULL, # if K=0, beta can be NULL
+    seed = NULL,
+    mu_tau = 1.0,
+    sd_tau = 1.0) {
   if (!is.null(seed)) {
     set.seed(seed)
   }
   stopifnot(is.matrix(W), nrow(W) == N, ncol(W) == N)
   stopifnot(length(w) == N, length(alpha) == N)
   if (K > 0 && is.null(beta)) {
-    stop("K>0 なら beta を与えてください。")
+    stop("If K>0, beta must be provided.")
   }
   if (is.null(beta)) {
     beta <- numeric(0)
@@ -125,7 +116,6 @@ scspill_sim_dgp <- function(
   if (is.finite(wsum) && wsum > 1e-12) {
     w_use <- w_use / wsum
   }
-  # (A) no-treatment
   A_pre <- IN - rho * W_use - rho * (w_use %*% t(alpha))
   rcA <- tryCatch(rcond(A_pre), error = function(e) NA_real_)
   if (!is.finite(rcA) || rcA < 1e-10) {
@@ -163,7 +153,6 @@ scspill_sim_dgp <- function(
     Y00_all[t] <- as.numeric(crossprod(alpha, yc0))
   }
 
-  # (B) post: treatment shock & SAR
   A_post <- IN - rho * W_use
   rcB <- tryCatch(rcond(A_post), error = function(e) NA_real_)
   if (!is.finite(rcB) || rcB < 1e-10) {
@@ -228,21 +217,20 @@ scspill_sim_dgp <- function(
 }
 
 # =========================================================
-# 1回分のシミュレーション（SCM / BSCM / SCSPILL）
-#   - dgp が NULL の場合は dgp_args から自動生成：
-#       * grid=c(nrow,ncol) で rook W
-#       * treated で w
-#       * seed は run_one_sim の引数から dgp に伝搬
+# Single simulation run (SCM / BSCM / SCSPILL)
+#   - if dgp is NULL, generate from dgp_args:
+#       * grid=c(nrow,ncol) for rook W
+#       * treated for w
+#       * seed passed from run_one_sim arguments to dgp
 # =========================================================
 #' @keywords internal
 run_one_sim <- function(
-  dgp = NULL,
-  dgp_args = NULL,
-  M = 2000,
-  burn = 1000,
-  step_rho = 0.02, # C++ 側の引数に合わせて残置（Stan は使いません）
-  seed = NULL
-) {
+    dgp = NULL,
+    dgp_args = NULL,
+    M = 2000,
+    burn = 1000,
+    step_rho = 0.02, # C++ 側の引数に合わせて残置（Stan は使いません）
+    seed = NULL) {
   if (is.null(dgp)) {
     if (is.null(dgp_args)) {
       stop("Provide either `dgp` or `dgp_args`.")
@@ -289,7 +277,6 @@ run_one_sim <- function(
   te_scm <- Y0_post - ycf_scm
   ate_scm <- mean(te_scm)
 
-  # --- BSCM（α の事後：従来の Gibbs を利用）---
   alpha_draws_bscm <- hs_alpha_gibbs_cpp(
     Y0_pre = Y0_pre,
     control_outcome_pre = Yc_pre,
@@ -326,7 +313,7 @@ run_one_sim <- function(
     T0 = T0,
     N = N,
     K = K,
-    p = 0, # シミュレーションは p=0 (因子なし) を仮定
+    p = 0, # simulation assumes p=0 (no factors)
     w = as.numeric(w),
     W = W,
     iteration = M,
@@ -344,37 +331,20 @@ run_one_sim <- function(
   idx_a <- sample(seq_len(nrow(alpha_draws_bscm)), S, replace = (S > nrow(alpha_draws_bscm)))
   idx_r <- sample(seq_len(M_rho), S, replace = (S > M_rho))
 
-  # 全ドローの時点別処置効果（T1 × M_rho）
-  # te_spill_mat <- vapply(
-  #   rho_draws_step2,
-  #   function(rh) {
-  #     ycf_m <- .scspill_cf_post(
-  #       Y0_post = Y0_post,
-  #       Yc_post = Yc_post,
-  #       W = W,
-  #       w = w,
-  #       alpha_hat = alpha_hat_bscm,
-  #       rho_hat = rh
-  #     )
-  #     Y0_post - ycf_m
-  #   },
-  #   FUN.VALUE = numeric(T1)
-  # )
-
   te_spill_mat <- matrix(NA_real_, nrow = T1, ncol = S)
 
   for (s in seq_len(S)) {
     ah <- as.numeric(alpha_draws_bscm[idx_a[s], ])
     rh <- rho_draws_step2[idx_r[s]]
     ycf_m <- .scspill_cf_post(
-        Y0_post = Y0_post,
-        Yc_post = Yc_post,
-        W = W,
-        w = w,
-        alpha_hat = ah,
-        rho_hat = rh
-      )
-      te_spill_mat[, s] <- (Y0_post - ycf_m)
+      Y0_post = Y0_post,
+      Yc_post = Yc_post,
+      W = W,
+      w = w,
+      alpha_hat = ah,
+      rho_hat = rh
+    )
+    te_spill_mat[, s] <- (Y0_post - ycf_m)
   }
 
   # 1) 各時点の事後平均（推定量）と 95% CI、被覆
@@ -396,9 +366,9 @@ run_one_sim <- function(
   # print(te_spill_ci)
   # print("================")
 
-  # 2) ATE の事後（各ドローで平均を取り、その分布からCI/被覆）
-  ate_spill_draws <- colMeans(te_spill_mat) # 各ドローの ATE
-  ate_spill_mean <- mean(ate_spill_draws) # ATE の事後平均
+  # 2) ATE posterior (average over draws, then CI/coverage from distribution)
+  ate_spill_draws <- colMeans(te_spill_mat)
+  ate_spill_mean <- mean(ate_spill_draws)
   ci_ate_spill <- stats::quantile(
     ate_spill_draws,
     c(0.025, 0.975),
@@ -409,26 +379,21 @@ run_one_sim <- function(
       mean(te_true) <= ci_ate_spill[2]
   )
 
-  # 3) 「保存すべき」各時点の MSE/Bias（Python: te_true - mean を使う）
+  # 3) MSE/Bias at each time point (Python: te_true - mean)
   mse_spill_time <- (te_true - te_spill_mean)^2
   bias_spill_time <- (te_true - te_spill_mean)
 
-  # --- metrics（SCM の coverage は NA）---
   effect_metrics <- function(te_hat, te_true) {
     c(
-      bias_point = mean(te_true - te_hat), # 時間平均バイアス
-      mse_point = mean((te_true - te_hat)^2) # 時間平均MSE（rootはまだ取らない）
+      bias_point = mean(te_true - te_hat),
+      mse_point = mean((te_true - te_hat)^2)
     )
   }
 
-  # ---- SCM ----
   met_SCM <- effect_metrics(te_scm, te_true)
-  # ---- BSCM ----
   met_BSCM <- effect_metrics(te_bscm_mean, te_true)
-  # ---- SCSPILL ----
   met_SP <- effect_metrics(te_spill_mean, te_true)
 
-  # ATE は誤差をそのまま保持（平方根はsummarize_many側）
   ate_true_scalar <- mean(te_true)
   ate_err_SCM <- ate_true_scalar - ate_scm
   ate_err_BSCM <- ate_true_scalar - ate_bscm_mean
@@ -437,9 +402,9 @@ run_one_sim <- function(
   metrics <- rbind(
     SCM = c(
       bias_ate = ate_err_SCM,
-      mse_ate = ate_err_SCM^2, # ATEのMSE
-      met_SCM, # bias_point, mse_point
-      cover95_ate = NA_real_, # SCMは事後分布なし
+      mse_ate = ate_err_SCM^2,
+      met_SCM,
+      cover95_ate = NA_real_,
       cover95_point = NA_real_
     ),
     BSCM = c(
@@ -461,7 +426,6 @@ run_one_sim <- function(
   metrics$method <- rownames(metrics)
   rownames(metrics) <- NULL
 
-  # 事後平均パス
   per_time_mean <- list(
     true = te_true,
     scm = te_scm,
@@ -469,21 +433,18 @@ run_one_sim <- function(
     scspill = te_spill_mean
   )
 
-  # 各時点の二乗誤差（MSE の素材）
   per_time_mse <- list(
     scm = (te_true - te_scm)^2,
     bscm = (te_true - te_bscm_mean)^2,
     scspill = (te_true - te_spill_mean)^2
   )
 
-  # 各時点のバイアス
   per_time_bias <- list(
     scm = te_true - te_scm,
     bscm = te_true - te_bscm_mean,
     scspill = te_true - te_spill_mean
   )
 
-  # 各時点のCIと被覆指標（BSCM/SCSPILL）
   bscm_ci <- t(apply(te_bscm_mat, 1, stats::quantile, probs = c(0.025, 0.975)))
   spill_ci <- t(apply(
     te_spill_mat,
@@ -503,13 +464,7 @@ run_one_sim <- function(
       cover = as.numeric(spill_ci[, 1] <= te_true & te_true <= spill_ci[, 2])
     )
   )
-  # print(te_true)
-  # print(spill_ci)
-  # print("===rho===")
-  # print(stats::quantile(rho_draws_step2, c(0.025, 0.975), names = FALSE))
-  # print("============")
 
-  # 返り値に追加
   list(
     truth = dgp$truth,
     draws = list(
@@ -539,11 +494,11 @@ run_one_sim <- function(
 # =========================================================
 #' @keywords internal
 run_many_sim <- function(
-  n_sims,
-  dgp_args, # scspill_sim_dgp に渡す引数
-  seeds = NULL,
-  ... # run_one_sim の引数（M, burn, step_rho など）
-) {
+    n_sims,
+    dgp_args, # arguments passed to scspill_sim_dgp
+    seeds = NULL,
+    ... # arguments for run_one_sim (M, burn, step_rho, etc.)
+    ) {
   if (is.null(seeds)) {
     seeds <- sample.int(.Machine$integer.max, n_sims)
   } else {
@@ -596,11 +551,9 @@ summarize_many <- function(results) {
 
   out <- merge(agg_mean, agg_sd, by = "method", all = TRUE)
 
-  # ★ ここで「モンテカルロ平均後に平方根」を取って RMSE を作る
   out$rmse_ate <- sqrt(out$mse_ate)
   out$rmse_point <- sqrt(out$mse_point)
 
-  # 表示上、MSEは残しても削っても構いません（残しておくと検算しやすい）
   out$method <- factor(out$method, levels = lev)
   out <- out[order(as.integer(out$method)), , drop = FALSE]
   rownames(out) <- NULL

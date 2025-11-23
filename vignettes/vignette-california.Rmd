@@ -61,8 +61,8 @@ fit <- sc_spillover(
   w = w,
   W = W,
   treatment_dummy = "treatment",
-  y = colnames(panel_df)[3],
-  X = c(colnames(panel_df)[4]),
+  y = colnames(panel_df)[4],
+  X = c(colnames(panel_df)[5]),
   p_factors = 1,
   M = 100000,
   burn = 50000,
@@ -381,7 +381,7 @@ ppc <- prior_predictive(
   a0 = 3,
   b0 = 1,
   rho_support = c(-0.99, 0.99),
-  R = 100000
+  R = 100
 )
 
 stat_names <- c(

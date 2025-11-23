@@ -126,17 +126,17 @@ run_sar_step2 <- function(
   N <- ncol(Yc_pre)
   stopifnot(length(w) == N, length(alpha_hat) == N, nrow(W) == N, ncol(W) == N)
 
-  # X の取り扱い（C++ 側は (T0*N*K) の NumericVector を期待）
+  # X handling: C++ expects (T0*N*K) NumericVector
   if (is.null(Xc_pre) || K <= 0) {
     Xvec <- NULL
     K <- 0L
   } else {
-    # 受け取った Xc_pre が array(T0,N,K) ならフラット化
+    # if Xc_pre is array(T0,N,K), flatten it
     if (length(dim(Xc_pre)) == 3L) {
       stopifnot(dim(Xc_pre)[1] == T0, dim(Xc_pre)[2] == N, dim(Xc_pre)[3] == K)
       Xvec <- as.numeric(aperm(Xc_pre, c(1, 2, 3)))
     } else {
-      # 既に (T0*N*K) ベクトルなら長さチェックのみ
+      # if already (T0*N*K) vector, check length only
       stopifnot(length(Xc_pre) == T0 * N * K)
       Xvec <- as.numeric(Xc_pre)
     }

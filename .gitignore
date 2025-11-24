@@ -7,3 +7,4 @@ tmp/
 .env
 data/raw/*
 *.png
+replication_package/

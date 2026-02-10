@@ -1,0 +1,35 @@
+Package: scspill
+Title: Synthetic Control with Spillover Effects
+Version: 0.1.0
+Authors@R: c(
+    person("Shosei", "Sakaguchi", role = c("aut","cph")), 
+    person("Hayato", "Tagawa", role = "aut"), 
+    person("Your", "Name", email = "you@example.com", role = c("cre","aut"))
+    )
+Description: Implements a Bayesian synthetic control method that allows for spillover effects via a spatial autoregressive (SAR) structure. It estimates synthetic weights with horseshoe priors and samples the SAR parameter rho, then identifies treatment and spillover effects using analytic formulas in the paper. Includes vignettes reproducing California tobacco and Sudan split studies.
+License: MIT + file LICENSE
+Depends: R (>= 4.2.0)
+Imports:
+    stats,
+    methods,
+    Matrix,
+    progress,
+    ggplot2,
+    Rcpp (>= 1.0.12),
+    RcppArmadillo
+LinkingTo:
+    Rcpp,
+    RcppArmadillo
+SystemRequirements: C++17
+Suggests:
+    knitr,
+    rmarkdown,
+    testthat (>= 3.1.0),
+    covr,
+    pkgdown
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+VignetteBuilder: knitr
+Config/testthat/edition: 3

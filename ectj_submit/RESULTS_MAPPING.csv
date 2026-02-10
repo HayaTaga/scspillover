@@ -1,0 +1,29 @@
+result_id,paper_output,script,output_file,generated_in_smoke,generated_in_full
+CA_FIG_DIAG,California diagnostics figure,code/01_california_main.R,output/figures/fig_ca_diag.png,yes,yes
+CA_FIG_PANEL_A,California panel outcomes (main),code/01_california_main.R,output/figures/fig_ca_panelA.pdf,yes,yes
+CA_FIG_PANEL_B,California treatment effect panel,code/01_california_main.R,output/figures/fig_ca_panelB.pdf,yes,yes
+CA_FIG_SPILLOVER,California spillover panel,code/01_california_main.R,output/figures/fig_ca_panel_spillover.pdf,yes,yes
+CA_FIG_PPA,California prior predictive figure,code/01_california_main.R,output/figures/fig_ca_prior_predictive.pdf,yes,yes
+CA_FIG_WEIGHTS,California weight comparison figure,code/01_california_main.R,output/figures/fig_ca_weight.pdf,yes,yes
+CA_TAB_DIAG,California diagnostics table,code/01_california_main.R,output/tables/ca_diag_table.tex,yes,yes
+CA_TAB_SENS,California prior sensitivity table,code/01_california_main.R,output/tables/ca_sens_table.tex,yes,yes
+CA_TAB_PPA,California prior predictive summary table,code/01_california_main.R,output/tables/ca_ppa_summary_table.tex,yes,yes
+CA_TAB_PPA_CSV,California prior predictive summary CSV,code/01_california_main.R,output/tables/ca_ppa_summary_table.csv,yes,yes
+CA_TAB_SENS_CSV,California prior sensitivity CSV,code/01_california_main.R,output/tables/ca_sensitivity.csv,yes,yes
+SD_FIG_DIAG,Sudan diagnostics figure,code/02_sudan_main.R,output/figures/fig_sudan_diag.png,yes,yes
+SD_FIG_PANEL_A,Sudan panel outcomes (main),code/02_sudan_main.R,output/figures/fig_sudan_panelA.pdf,yes,yes
+SD_FIG_PANEL_B,Sudan treatment effect panel,code/02_sudan_main.R,output/figures/fig_sudan_panelB.pdf,yes,yes
+SD_FIG_SPILLOVER,Sudan spillover panel,code/02_sudan_main.R,output/figures/fig_sudan_panel_spillover.pdf,yes,yes
+SD_FIG_PPA,Sudan prior predictive figure,code/02_sudan_main.R,output/figures/fig_sudan_prior_predictive.pdf,yes,yes
+SD_FIG_TRADE,Sudan trade-weight figure,code/02_sudan_main.R,output/figures/fig_sudan_trade.pdf,yes,yes
+SD_FIG_WEIGHTS,Sudan weight comparison figure,code/02_sudan_main.R,output/figures/fig_sudan_weight.pdf,yes,yes
+SD_TAB_DIAG,Sudan diagnostics table,code/02_sudan_main.R,output/tables/sudan_diag_table.tex,yes,yes
+SD_TAB_SENS,Sudan prior sensitivity table,code/02_sudan_main.R,output/tables/sudan_sens_table.tex,yes,yes
+SD_TAB_PPA,Sudan prior predictive summary table,code/02_sudan_main.R,output/tables/sudan_ppa_summary_table.tex,yes,yes
+SD_TAB_DIAG_CSV,Sudan diagnostics CSV,code/02_sudan_main.R,output/tables/sudan_diag_table.csv,yes,yes
+SD_TAB_SENS_CSV,Sudan prior sensitivity CSV,code/02_sudan_main.R,output/tables/sudan_sensitivity.csv,yes,yes
+SD_TAB_PPA_CSV,Sudan prior predictive summary CSV,code/02_sudan_main.R,output/tables/sudan_ppa_summary_table.csv,yes,yes
+SIM_TAB_MAIN,Simulation summary tables,code/03_simulation_main.R,output/tables/simulation_results.tex,yes,yes
+SIM_CSV_GRID,Simulation scenario CSVs (pattern),code/03_simulation_main.R,output/tables/mc_result/mc_study_N=*T0=*T1=*.csv,yes,yes
+GW_TAB_JDT,Geweke JDT summary table,code/04_geweke_main.R,output/tables/geweke_jdt_summary.tex,yes,yes
+GW_TAB_JDT_CSV,Geweke JDT summary CSV,code/04_geweke_main.R,output/tables/geweke_jdt_summary.csv,yes,yes

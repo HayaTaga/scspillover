@@ -1,0 +1,95 @@
+run_timestamp: 2026-02-10 13:51:45 +0900
+script: code/04_geweke_main.R
+mode: smoke
+target: all
+mode_purpose: Pipeline integrity check only (not a claim of final manuscript-scale numerical reproduction).
+r_version: R version 4.2.3 (2023-03-15)
+platform: Darwin 25.3.0 arm64
+seed_contract: global set.seed(20251030)
+dependency_lock:
+- Rcpp==1.0.12
+- RcppArmadillo==0.12.4.1.0
+- Matrix==1.6.0
+- progress==1.2.2
+- dplyr==1.1.2
+- tidyr==1.3.0
+- ggplot2==3.5.2
+- stringr==1.5.0
+- knitr==1.43
+- rmarkdown==2.23
+- kableExtra==1.4.0
+- ggpattern==1.2.1
+- purrr==1.0.1
+- readr==2.1.4
+- glue==1.6.2
+- coda==0.19.4.1
+- mcmcse==1.5.0
+- posterior==1.6.1
+--- script output ---
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘kableExtra’
+
+The following object is masked from ‘package:dplyr’:
+
+    group_rows
+
+[seed-init] script=geweke_main global_seed=20251030 mode=smoke
+[JDT] MC side (iid) ...
+[JDT] SC side (successive-conditional) ...
+                  g      mean_iid   mean_mcmc       se_iid    se_mcmc
+1               rho -1.104085e-02  0.14596511  0.007369035 0.06139973
+2        log_sigma2  5.816429e-01  0.36631700  0.018069693 0.10673492
+3           yc_mean -1.602694e-02  0.06413631  0.013509834 0.03631670
+4        log_yc_var  2.512169e+00  2.54402480  0.019308449 0.10565732
+5 spatial_quadratic -2.868731e+01  7.47191357 12.260119749 3.25883152
+6       corr_y0_wyc -1.166441e-03 -0.02529251  0.003326480 0.01078090
+7         beta_mean  9.152949e-03 -0.04806769  0.009955625 0.08953347
+8          Eta_mean  1.219151e-03 -0.02202671  0.005009054 0.02048001
+9        Gamma_mean  3.905169e-05 -0.01036956  0.003577113 0.01269626
+           Z        pval
+1 -2.5388917 0.011120423
+2  1.9890861 0.046691703
+3 -2.0688285 0.038562181
+4 -0.2965901 0.766779486
+5 -2.8503611 0.004366963
+6  2.1383750 0.032486319
+7  0.6351831 0.525309009
+8  1.1025522 0.270221675
+9  0.7890954 0.430056237
+
+
+Table: Summary of Joint Distribution Test Results
+
+|Statistic $g$             |  Mean (iid)| Mean (MCMC)|   SE (iid)| SE (MCMC)|        $Z$| $p$-value|
+|:-------------------------|-----------:|-----------:|----------:|---------:|----------:|---------:|
+|$\rho$                    |  -0.0110409|   0.1459651|  0.0073690| 0.0613997| -2.5388917| 0.0111204|
+|$\log(\sigma^2)$          |   0.5816429|   0.3663170|  0.0180697| 0.1067349|  1.9890861| 0.0466917|
+|$\bar{y}_c$               |  -0.0160269|   0.0641363|  0.0135098| 0.0363167| -2.0688285| 0.0385622|
+|$\log(\mathrm{Var}(y_c))$ |   2.5121689|   2.5440248|  0.0193084| 0.1056573| -0.2965901| 0.7667795|
+|$h_{\text{spatial}}$      | -28.6873087|   7.4719136| 12.2601197| 3.2588315| -2.8503611| 0.0043670|
+|$\mathrm{Corr}(y_0, Wy)$  |  -0.0011664|  -0.0252925|  0.0033265| 0.0107809|  2.1383750| 0.0324863|
+|$\bar{\beta}$             |   0.0091529|  -0.0480677|  0.0099556| 0.0895335|  0.6351831| 0.5253090|
+|$\bar{\eta}$              |   0.0012192|  -0.0220267|  0.0050091| 0.0204800|  1.1025522| 0.2702217|
+|$\bar{\Gamma}$            |   0.0000391|  -0.0103696|  0.0035771| 0.0126963|  0.7890954| 0.4300562|
+
+
+Table: Appendix JDT with custom g-function.
+
+|g           |   mean_iid|   mean_mcmc|    se_iid|    se_mcmc|          Z|      pval|
+|:-----------|----------:|-----------:|---------:|----------:|----------:|---------:|
+|rho         | -0.0054047|  -0.0122172| 0.0074083|  0.0702349|  0.0964602| 0.9231550|
+|rho_sq      |  0.2743866|   0.3559416| 0.0034898|  0.0351831| -2.3066998| 0.0210716|
+|log_sigma2  |  0.5785240|   0.6497744| 0.0182704|  0.1333125| -0.5295112| 0.5964509|
+|yc_mean     |  0.0146683|  -0.0941418| 0.0143455|  0.0583506|  1.8108408| 0.0701655|
+|yc_center_q | 64.3408196| 104.1775933| 7.4488407| 28.2725408| -1.3625309| 0.1730304|

@@ -1,0 +1,7 @@
+Code license: MIT (see package metadata in DESCRIPTION and file LICENSE).
+
+Data license and redistribution notes:
+- The replication package includes processed data extracts and non-proprietary CSV copies.
+- Original data providers retain their rights over original source datasets.
+- Users must cite original data sources listed in README_submit.md.
+- Redistribution of any original raw source files remains subject to provider terms.

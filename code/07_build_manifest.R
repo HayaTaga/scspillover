@@ -2,7 +2,10 @@ classify_file <- function(path) {
   if (grepl("^(code/|R/|src/|vignettes/)", path) || path %in% c("Makefile")) {
     return("code")
   }
-  if (grepl("^data/", path) && grepl("[.](rda|csv)$", path)) {
+  if (grepl("^data/VARIABLE_DICTIONARY[.]md$", path)) {
+    return("documentation")
+  }
+  if (grepl("^data/", path)) {
     return("input_data")
   }
   if (grepl("^output/", path)) {
@@ -25,7 +28,9 @@ gen_flag <- function(path) {
 
 files <- list.files(".", recursive = TRUE, all.files = TRUE, no.. = TRUE)
 files <- files[!grepl("^\\.git/", files)]
+files <- files[!grepl("^(ectj_submit|replication_package)/", files)]
 files <- files[file.info(files)$isdir %in% c(FALSE)]
+files <- files[!grepl("(^|/)\\.DS_Store$", files)]
 files <- sort(files)
 
 manifest_actual <- data.frame(

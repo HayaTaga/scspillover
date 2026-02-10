@@ -28,6 +28,18 @@ Datasets required for replication are bundled in this package:
 - `data/california_smoking.rda`
 - `data/sudan_secession.rda`
 
+Raw source data used to construct bundled analysis objects are also included:
+
+- `data/raw/smoking.dta`
+- `data/raw/IMF_trade.csv`
+- `data/raw/P_Data_Extract_From_World_Development_Indicators/`
+- `data/raw/tl_2024_us_state/`
+
+Processed intermediate datasets are included:
+
+- `data/processed/tobacco/`
+- `data/processed/Sudan/`
+
 Non-proprietary copies are bundled as CSV:
 
 - `data/nonproprietary/california_panel.csv`
@@ -209,4 +221,4 @@ If absolute paths appear in some environments, they are environment artifacts on
 1. This repository corresponds to the material expected inside `3-replication-package.zip`.
 2. `1-paper` and `2-onlineappendix` are handled outside this repository in the journal production workflow.
 3. No restricted-data exemption workflow is used in this package version.
-4. Bundled `.rda` analysis extracts are treated as reproducibility inputs; provider-side raw download bundles are outside this repository.
+4. Bundled `.rda` analysis extracts are primary runtime inputs; raw and processed source data are additionally included under `data/raw/` and `data/processed/`.

@@ -1,0 +1,8 @@
+clean_name,wdi_like,note
+gdp_pc_const,GDP.per.capita..constant.2015.US..,Per-capita GDP (constant 2015 USD)
+exp_gdp,Exports.of.goods.and.services....of.GDP.,"Exports of goods & services (% of GDP, proportion after scaling)"
+merch_trade_gdp,Merchandise.trade....of.GDP.,"Merchandise trade (% of GDP, proportion)"
+trade_gdp,Trade....of.GDP.,"Trade (% of GDP, proportion)"
+clean_cooking_access,Access.to.clean.fuels.and.technologies.for.cooking....of.population.,"Access to clean fuels/tech for cooking (% of population, proportion)"
+inflation_cpi,Inflation..consumer.prices..annual...,"Inflation, CPI (annual, proportion)"
+net_migration,Net.migration,Net migration (persons)

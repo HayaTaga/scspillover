@@ -1,6 +1,14 @@
 args <- commandArgs(trailingOnly = TRUE)
-mode <- if (length(args) >= 1) tolower(args[[1]]) else tolower(Sys.getenv("SCSPILL_MODE", "full"))
-target <- if (length(args) >= 2) tolower(args[[2]]) else "all"
+mode <- if (length(args) >= 1) {
+  tolower(args[[1]])
+} else {
+  tolower(Sys.getenv("SCSPILL_MODE", "full"))
+}
+target <- if (length(args) >= 2) {
+  tolower(args[[2]])
+} else {
+  tolower(Sys.getenv("SCSPILL_TARGET", "all"))
+}
 
 if (!mode %in% c("full", "smoke")) {
   stop("Mode must be 'full' or 'smoke'.")
@@ -8,6 +16,10 @@ if (!mode %in% c("full", "smoke")) {
 if (!target %in% c("all", "main", "simulation", "geweke")) {
   stop("Target must be one of: all, main, simulation, geweke.")
 }
+
+interactive_step <- interactive() &&
+  length(args) == 0 &&
+  identical(tolower(Sys.getenv("SCSPILL_INTERACTIVE_STEP", "true")), "true")
 
 mode_purpose <- switch(
   mode,
@@ -22,7 +34,10 @@ setup_out <- system2(
   c("code/00_setup.R"),
   env = c(
     paste0("SCSPILL_MODE=", mode),
-    paste0("SCSPILL_INSTALL_MISSING=", Sys.getenv("SCSPILL_INSTALL_MISSING", "false")),
+    paste0(
+      "SCSPILL_INSTALL_MISSING=",
+      Sys.getenv("SCSPILL_INSTALL_MISSING", "false")
+    ),
     paste0("SCSPILL_ENFORCE_LOCK=", Sys.getenv("SCSPILL_ENFORCE_LOCK", "false"))
   ),
   stdout = TRUE,
@@ -48,7 +63,12 @@ cat(export_out, sep = "\n")
 
 scripts <- switch(
   target,
-  all = c("code/01_california_main.R", "code/02_sudan_main.R", "code/03_simulation_main.R", "code/04_geweke_main.R"),
+  all = c(
+    "code/01_california_main.R",
+    "code/02_sudan_main.R",
+    "code/03_simulation_main.R",
+    "code/04_geweke_main.R"
+  ),
   main = c("code/01_california_main.R", "code/02_sudan_main.R"),
   simulation = c("code/03_simulation_main.R"),
   geweke = c("code/04_geweke_main.R")
@@ -63,7 +83,12 @@ script_seed_contract <- c(
 
 read_lock <- function(path = "DEPENDENCY_LOCK.csv") {
   if (!file.exists(path)) {
-    return(data.frame(type = character(0), name = character(0), version = character(0), stringsAsFactors = FALSE))
+    return(data.frame(
+      type = character(0),
+      name = character(0),
+      version = character(0),
+      stringsAsFactors = FALSE
+    ))
   }
   utils::read.csv(path, stringsAsFactors = FALSE)
 }
@@ -87,7 +112,12 @@ build_log_header <- function(script, mode, target, lock_df, seed_contract) {
     sprintf("target: %s", target),
     sprintf("mode_purpose: %s", mode_purpose),
     sprintf("r_version: %s", R.version.string),
-    sprintf("platform: %s %s %s", sys[["sysname"]], sys[["release"]], sys[["machine"]]),
+    sprintf(
+      "platform: %s %s %s",
+      sys[["sysname"]],
+      sys[["release"]],
+      sys[["machine"]]
+    ),
     sprintf("seed_contract: %s", seed_contract),
     "dependency_lock:",
     pkg_lines,
@@ -119,7 +149,10 @@ check_expected_outputs <- function(target) {
   )
 
   simulation_outputs <- c("output/tables/simulation_results.tex")
-  geweke_outputs <- c("output/tables/geweke_jdt_summary.tex", "output/tables/geweke_jdt_summary.csv")
+  geweke_outputs <- c(
+    "output/tables/geweke_jdt_summary.tex",
+    "output/tables/geweke_jdt_summary.csv"
+  )
 
   required <- switch(
     target,
@@ -131,13 +164,22 @@ check_expected_outputs <- function(target) {
 
   missing <- required[!file.exists(required)]
   if (length(missing) > 0) {
-    stop(sprintf("Missing expected output files: %s", paste(missing, collapse = ", ")))
+    stop(sprintf(
+      "Missing expected output files: %s",
+      paste(missing, collapse = ", ")
+    ))
   }
 
   if (target %in% c("all", "simulation")) {
-    mc_files <- list.files("output/tables/mc_result", pattern = "^mc_study_.*[.]csv$", full.names = TRUE)
+    mc_files <- list.files(
+      "output/tables/mc_result",
+      pattern = "^mc_study_.*[.]csv$",
+      full.names = TRUE
+    )
     if (length(mc_files) < 1) {
-      stop("Missing expected Monte Carlo result CSVs in output/tables/mc_result/.")
+      stop(
+        "Missing expected Monte Carlo result CSVs in output/tables/mc_result/."
+      )
     }
   }
 }
@@ -149,15 +191,39 @@ dir.create("output/logs", recursive = TRUE, showWarnings = FALSE)
 clean_output <- identical(Sys.getenv("SCSPILL_CLEAN_OUTPUT", "true"), "true")
 if (clean_output) {
   unlink(list.files("output/figures", full.names = TRUE), force = TRUE)
-  unlink(list.files("output/tables", full.names = TRUE), recursive = TRUE, force = TRUE)
+  unlink(
+    list.files("output/tables", full.names = TRUE),
+    recursive = TRUE,
+    force = TRUE
+  )
   dir.create("output/tables/mc_result", recursive = TRUE, showWarnings = FALSE)
 }
 
 timestamp <- format(Sys.time(), "%Y%m%d-%H%M%S")
+aborted_by_user <- FALSE
 for (script in scripts) {
+  if (interactive_step) {
+    ans <- tolower(trimws(readline(sprintf(
+      "About to run %s [mode=%s, target=%s]. Press Enter to continue or type 'q' to stop: ",
+      script,
+      mode,
+      target
+    ))))
+    if (ans %in% c("q", "quit")) {
+      message(sprintf("Stopped by user before: %s", script))
+      aborted_by_user <- TRUE
+      break
+    }
+  }
+
   log_file <- file.path(
     "output/logs",
-    sprintf("%s_%s_%s.log", timestamp, tools::file_path_sans_ext(basename(script)), mode)
+    sprintf(
+      "%s_%s_%s.log",
+      timestamp,
+      tools::file_path_sans_ext(basename(script)),
+      mode
+    )
   )
   tmp_log <- tempfile(pattern = "scspill_log_", fileext = ".txt")
 
@@ -176,7 +242,11 @@ for (script in scripts) {
     lock_df = lock_df,
     seed_contract = script_seed_contract[[script]]
   )
-  body <- if (file.exists(tmp_log)) readLines(tmp_log, warn = FALSE) else character(0)
+  body <- if (file.exists(tmp_log)) {
+    readLines(tmp_log, warn = FALSE)
+  } else {
+    character(0)
+  }
   writeLines(c(header, body), con = log_file)
 
   if (status != 0) {
@@ -186,11 +256,17 @@ for (script in scripts) {
   message(sprintf("Log: %s", log_file))
 }
 
-check_expected_outputs(target)
+if (!aborted_by_user) {
+  check_expected_outputs(target)
 
-if (mode == "smoke") {
-  message("Smoke run completed: pipeline integrity verified.")
+  if (mode == "smoke") {
+    message("Smoke run completed: pipeline integrity verified.")
+  } else {
+    message("Full run completed: manuscript-scale outputs generated.")
+  }
+  message("Replication workflow completed.")
 } else {
-  message("Full run completed: manuscript-scale outputs generated.")
+  message(
+    "Partial interactive run completed. Expected-output checks were skipped."
+  )
 }
-message("Replication workflow completed.")

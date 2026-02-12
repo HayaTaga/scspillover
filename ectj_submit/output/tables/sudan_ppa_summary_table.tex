@@ -1,0 +1,26 @@
+\begin{table}[!h]
+\centering
+\caption{Prior Predictive Analysis Summary Table (Sudan Split)}
+\label{tab:sudan_ppa}
+\centering
+\begin{tabular}[t]{lrr}
+\toprule
+Statistic & Observed & $P(h \leq h(y^{o}) | A)$\\
+\midrule
+Mean & 2142.779 & 0.806\\
+log-Var & 15.666 & 0.625\\
+Spatial Quad. & 7464968.100 & 0.614\\
+Corr($Y_0$, $w'Y$) & 0.799 & 0.750\\
+AC(1) & 0.892 & 0.339\\
+\addlinespace
+AC(2) & 0.786 & 0.294\\
+PVE(PC1) & 0.823 & 0.503\\
+Skewness & 0.145 & 0.923\\
+Kurtosis & -1.312 & 0.501\\
+\bottomrule
+\end{tabular}
+\begin{tablenotes}
+  \footnotesize
+  \item \textit{Notes:} The table reports the Bayesian p-values for the prior predictive check, defined as the proportion of simulated statistics that are less than or equal to the observed statistic, $P(h(y_{sim}) \le h(y_{obs}) \mid \text{Prior})$. Values far from 0 or 1 indicate consistency between the prior/model and the data.
+\end{tablenotes}
+\end{table}

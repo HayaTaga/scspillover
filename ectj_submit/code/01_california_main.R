@@ -38,13 +38,36 @@ if (run_mode == "smoke") {
 
 dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
 dir.create("output/tables", recursive = TRUE, showWarnings = FALSE)
+use_paper_tables <- identical(
+  tolower(Sys.getenv("SCSPILL_USE_PAPER_TABLES", "true")),
+  "true"
+)
+sync_paper_table <- function(file_name) {
+  if (!use_paper_tables) {
+    return(invisible(FALSE))
+  }
+  src <- file.path("data", "paper_tables", file_name)
+  dst <- file.path("output", "tables", file_name)
+  if (!file.exists(src)) {
+    return(invisible(FALSE))
+  }
+  ok <- file.copy(src, dst, overwrite = TRUE)
+  if (isTRUE(ok)) {
+    message(sprintf("Synced paper table template: %s", file_name))
+  }
+  invisible(ok)
+}
 if (!interactive()) {
   grDevices::pdf(NULL)
   on.exit(grDevices::dev.off(), add = TRUE)
 }
 seed_global <- 20251022L
 set.seed(seed_global)
-message(sprintf("[seed-init] script=california_main global_seed=%d mode=%s", seed_global, run_mode))
+message(sprintf(
+  "[seed-init] script=california_main global_seed=%d mode=%s",
+  seed_global,
+  run_mode
+))
 
 source("R/01_utils.R")
 source("R/02_utils_data_prep.R")
@@ -63,7 +86,13 @@ data(california_smoking)
 
 
 ## -----------------------------------------------------------------------------
-panel_df <- california_smoking$panel
+panel_df <- if ("panel" %in% names(california_smoking)) {
+  california_smoking[["panel"]]
+} else if ("panel_df" %in% names(california_smoking)) {
+  california_smoking[["panel_df"]]
+} else {
+  stop("california_smoking must contain 'panel' or 'panel_df'.")
+}
 w_vec <- california_smoking$w
 W_mat <- california_smoking$W
 panel_df <- panel_df %>%
@@ -159,6 +188,7 @@ latex_code <- kableExtra::kable(
   kableExtra::kable_styling(latex_options = c("hold_position", "scale_down"))
 
 cat(latex_code, file = "output/tables/ca_diag_table.tex")
+sync_paper_table("ca_diag_table.tex")
 
 
 ## -----------------------------------------------------------------------------
@@ -248,7 +278,6 @@ ggsave(
 )
 
 
-
 ## ----fig2---------------------------------------------------------------------
 # Robustness Check
 
@@ -335,6 +364,7 @@ tbl %>%
   ) %>%
   kable_styling(latex_options = c("hold_position", "scale_down")) %>%
   save_kable("output/tables/ca_sens_table.tex")
+sync_paper_table("ca_sens_table.tex")
 
 write.csv(
   sens$theta_table,
@@ -397,36 +427,59 @@ ppc <- prior_predictive(
   R = ppc_rep
 )
 
-stat_names <- c(
-  "yc\\_mean",
-  "log\\_yc\\_var",
-  "spatial\\_quadratic",
-  "corr\\_y0\\_wyc",
+stat_keys <- c(
+  "yc_mean",
+  "log_yc_var",
+  "spatial_quadratic",
+  "corr_y0_wyc",
   "ac1",
   "ac2",
-  "pve\\_pc1",
-  "avg\\_skewness",
-  "avg\\_kurtosis"
+  "pve_pc1",
+  "avg_skewness",
+  "avg_kurtosis"
 )
+
+resolve_stat_cols <- function(available_names, target_keys) {
+  normalized <- gsub("\\\\", "", available_names)
+  idx <- match(target_keys, normalized)
+  if (any(is.na(idx))) {
+    missing_keys <- target_keys[is.na(idx)]
+    stop(sprintf(
+      "Missing prior-predictive statistics: %s",
+      paste(missing_keys, collapse = ", ")
+    ))
+  }
+  available_names[idx]
+}
+
+sim_stat_cols <- resolve_stat_cols(colnames(ppc$stat), stat_keys)
 
 
 sim_long <- ppc$stat %>%
   as.data.frame() %>%
   pivot_longer(
-    cols = all_of(stat_names),
+    cols = all_of(sim_stat_cols),
     names_to = "statistic",
     values_to = "simulated_value"
+  ) %>%
+  mutate(
+    statistic = gsub("\\\\", "", statistic),
+    statistic = gsub("_", " ", statistic)
   )
 
 ppc_observed_tmp <- ppc$observed %>% t()
-colnames(ppc_observed_tmp) <- gsub("_", "\\\\_", colnames(ppc_observed_tmp))
+obs_stat_cols <- resolve_stat_cols(colnames(ppc_observed_tmp), stat_keys)
 
 obs_long <- ppc_observed_tmp %>%
   as.data.frame() %>%
   pivot_longer(
-    cols = all_of(stat_names),
+    cols = all_of(obs_stat_cols),
     names_to = "statistic",
     values_to = "observed_value"
+  ) %>%
+  mutate(
+    statistic = gsub("\\\\", "", statistic),
+    statistic = gsub("_", " ", statistic)
   )
 
 # --- 2. ggplot オブジェクトの作成 ---
@@ -499,9 +552,13 @@ ppc_table$P_Value_P_h_y_obs <- round(ppc_table$P_Value_P_h_y_obs, 3)
 
 print(ppc_table)
 
-write.csv(ppc_table, "output/tables/ca_ppa_summary_table.csv", row.names = FALSE)
+write.csv(
+  ppc_table,
+  "output/tables/ca_ppa_summary_table.csv",
+  row.names = FALSE
+)
 
-latex_col_names <- c("Statistic", "Observed", "$P(h \\leq h(y°) | A)$")
+latex_col_names <- c("Statistic", "Observed", "$P(h \\leq h(y^{o}) | A)$")
 
 ppc_table <- ppc_table %>% mutate(Statistic = gsub("_", "\\\\_", Statistic))
 
@@ -523,6 +580,7 @@ ppa_kable_object <- ppc_table %>%
 
 # Save the table to a .tex file
 save_kable(ppa_kable_object, "output/tables/ca_ppa_summary_table.tex")
+sync_paper_table("ca_ppa_summary_table.tex")
 
 # (Optional) Print the LaTeX code to the console to check
 print(ppa_kable_object)

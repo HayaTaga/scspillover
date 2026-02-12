@@ -1,13 +1,37 @@
 required_pkgs <- c(
-  "Rcpp", "RcppArmadillo", "Matrix", "progress",
-  "dplyr", "tidyr", "ggplot2", "stringr",
-  "knitr", "rmarkdown", "kableExtra", "ggpattern",
-  "purrr", "readr", "glue", "coda", "mcmcse", "posterior"
+  "Rcpp",
+  "RcppArmadillo",
+  "Matrix",
+  "progress",
+  "dplyr",
+  "tidyr",
+  "ggplot2",
+  "stringr",
+  "knitr",
+  "rmarkdown",
+  "kableExtra",
+  "ggpattern",
+  "purrr",
+  "readr",
+  "glue",
+  "coda",
+  "mcmcse",
+  "posterior"
 )
 
-missing_pkgs <- required_pkgs[!vapply(required_pkgs, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))]
+missing_pkgs <- required_pkgs[
+  !vapply(
+    required_pkgs,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  )
+]
 if (length(missing_pkgs) > 0) {
-  install_missing <- identical(Sys.getenv("SCSPILL_INSTALL_MISSING", "false"), "true")
+  install_missing <- identical(
+    Sys.getenv("SCSPILL_INSTALL_MISSING", "false"),
+    "true"
+  )
   if (!install_missing) {
     stop(
       sprintf(
@@ -25,9 +49,19 @@ if (length(missing_pkgs) > 0) {
 }
 
 # Re-check after optional installation.
-still_missing <- required_pkgs[!vapply(required_pkgs, requireNamespace, quietly = TRUE, FUN.VALUE = logical(1))]
+still_missing <- required_pkgs[
+  !vapply(
+    required_pkgs,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  )
+]
 if (length(still_missing) > 0) {
-  stop(sprintf("Could not load required packages: %s", paste(still_missing, collapse = ", ")))
+  stop(sprintf(
+    "Could not load required packages: %s",
+    paste(still_missing, collapse = ", ")
+  ))
 }
 
 lock_path <- "DEPENDENCY_LOCK.csv"
@@ -49,7 +83,10 @@ if (file.exists(lock_path)) {
       }
     }
     if (length(mismatches) > 0) {
-      enforce_lock <- identical(Sys.getenv("SCSPILL_ENFORCE_LOCK", "false"), "true")
+      enforce_lock <- identical(
+        Sys.getenv("SCSPILL_ENFORCE_LOCK", "false"),
+        "true"
+      )
       msg <- paste(
         "Version differences against DEPENDENCY_LOCK.csv:",
         paste(mismatches, collapse = "; "),
@@ -64,10 +101,17 @@ if (file.exists(lock_path)) {
   }
 }
 
-pkg_versions <- vapply(required_pkgs, function(p) as.character(utils::packageVersion(p)), character(1))
+pkg_versions <- vapply(
+  required_pkgs,
+  function(p) as.character(utils::packageVersion(p)),
+  character(1)
+)
 message("All required packages are available.")
 message(sprintf("R version: %s", R.version.string))
-message(sprintf("Platform: %s", paste(Sys.info()[c("sysname", "release", "machine")], collapse = " ")))
+message(sprintf(
+  "Platform: %s",
+  paste(Sys.info()[c("sysname", "release", "machine")], collapse = " ")
+))
 message("Package versions:")
 for (p in names(pkg_versions)) {
   message(sprintf("- %s: %s", p, pkg_versions[[p]]))

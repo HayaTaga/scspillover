@@ -1,0 +1,112 @@
+run_timestamp: 2026-02-11 15:50:18 +0900
+script: code/01_california_main.R
+mode: smoke
+target: main
+mode_purpose: Pipeline integrity check only (not a claim of final manuscript-scale numerical reproduction).
+r_version: R version 4.5.0 (2025-04-11)
+platform: Darwin 25.3.0 arm64
+seed_contract: global set.seed(20251022) and sc_spillover seed=20251022
+dependency_lock:
+- Rcpp==1.0.12
+- RcppArmadillo==0.12.4.1.0
+- Matrix==1.6.0
+- progress==1.2.2
+- dplyr==1.1.2
+- tidyr==1.3.0
+- ggplot2==3.5.2
+- stringr==1.5.0
+- knitr==1.43
+- rmarkdown==2.23
+- kableExtra==1.4.0
+- ggpattern==1.2.1
+- purrr==1.0.1
+- readr==2.1.4
+- glue==1.6.2
+- coda==0.19.4.1
+- mcmcse==1.5.0
+- posterior==1.6.1
+--- script output ---
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘kableExtra’
+
+The following object is masked from ‘package:dplyr’:
+
+    group_rows
+
+[seed-init] script=california_main global_seed=20251022 mode=smoke
+[Step 1] Sampling alpha via BSCM (horseshoe prior)...
+[Step 2] Sampling rho (and others) with fixed alpha_hat...
+             parameter         mean         sd        q025          q50
+8               sigma2 77.547455226 4.49211777 69.50468396 77.391333755
+4        alpha[Nevada]  0.193805427 0.04514509  0.05992664  0.198917857
+9          beta[beta1] -0.002351992 0.01601952 -0.03081397 -0.003433528
+2     alpha[Tennessee] -0.245291258 0.16726106 -0.57967192 -0.243840423
+7      alpha[Illinois]  0.096402439 0.11207226 -0.03835250  0.064832955
+6 alpha[West Virginia]  0.117205691 0.09575737 -0.02572792  0.118090574
+5       alpha[Montana]  0.133890463 0.13296561 -0.02872585  0.109406656
+3   alpha[Connecticut]  0.240962127 0.17272007 -0.02592259  0.247766314
+1                  rho  0.313039247 0.02765428  0.25203846  0.315830456
+         q975        ess rhat_split
+8 87.15343878 189.262080  1.0001056
+4  0.26381870  60.625730  1.0017811
+9  0.03145554  53.009190  1.0184793
+2  0.01919293  51.934234  0.9996681
+7  0.35905828  51.302391  1.0110859
+6  0.29908658  49.677483  0.9998357
+5  0.42353516  44.113620  1.0000081
+3  0.58467592  33.912153  1.0105077
+1  0.35645891   5.958008  1.0330289
+Synced paper table template: ca_diag_table.tex
+[1] 0.313
+ 2.5% 97.5% 
+0.252 0.356 
+Warning messages:
+1: In data.frame(..., check.names = FALSE) :
+  row names were found from a short variable and have been discarded
+2: In data.frame(..., check.names = FALSE) :
+  row names were found from a short variable and have been discarded
+3: In data.frame(..., check.names = FALSE) :
+  row names were found from a short variable and have been discarded
+Synced paper table template: ca_sens_table.tex
+Error in `pivot_longer()`:
+ℹ In argument: `all_of(stat_names)`.
+Caused by error in `all_of()`:
+! Can't subset elements that don't exist.
+✖ Elements `yc_mean`, `log_yc_var`, `spatial_quadratic`, `corr_y0_wyc`, `pve_pc1`, etc. don't exist.
+Backtrace:
+     ▆
+  1. ├─... %>% mutate(statistic = gsub("_", " ", statistic))
+  2. ├─dplyr::mutate(., statistic = gsub("_", " ", statistic))
+  3. ├─tidyr::pivot_longer(...)
+  4. ├─tidyr:::pivot_longer.data.frame(., cols = all_of(stat_names), names_to = "statistic", values_to = "simulated_value")
+  5. │ └─tidyr::build_longer_spec(...)
+  6. │   └─tidyselect::eval_select(...)
+  7. │     └─tidyselect:::eval_select_impl(...)
+  8. │       ├─tidyselect:::with_subscript_errors(...)
+  9. │       │ └─base::withCallingHandlers(...)
+ 10. │       └─tidyselect:::vars_select_eval(...)
+ 11. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 12. │           └─tidyselect:::eval_context(expr, context_mask, call = error_call)
+ 13. │             ├─tidyselect:::with_chained_errors(...)
+ 14. │             │ └─base::withCallingHandlers(...)
+ 15. │             └─rlang::eval_tidy(as_quosure(expr, env), context_mask)
+ 16. ├─tidyselect::all_of(stat_names)
+ 17. │ └─tidyselect:::as_indices_impl(x, vars = vars, strict = TRUE)
+ 18. │   └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 19. │     └─vctrs::vec_as_location(...)
+ 20. └─vctrs (local) `<fn>`()
+ 21.   └─vctrs:::stop_subscript_oob(...)
+ 22.     └─vctrs:::stop_subscript(...)
+ 23.       └─rlang::abort(...)
+Execution halted

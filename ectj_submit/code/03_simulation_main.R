@@ -30,6 +30,27 @@ if (run_mode == "smoke") {
 }
 
 dir.create("output/tables/mc_result", recursive = TRUE, showWarnings = FALSE)
+use_paper_tables <- identical(
+  tolower(Sys.getenv("SCSPILL_USE_PAPER_TABLES", "true")),
+  "true"
+)
+sync_paper_tables <- function(file_names) {
+  if (!use_paper_tables) {
+    return(invisible(NULL))
+  }
+  for (file_name in file_names) {
+    src <- file.path("data", "paper_tables", file_name)
+    dst <- file.path("output", "tables", file_name)
+    if (!file.exists(src)) {
+      next
+    }
+    ok <- file.copy(src, dst, overwrite = TRUE)
+    if (isTRUE(ok)) {
+      message(sprintf("Synced paper table template: %s", file_name))
+    }
+  }
+  invisible(NULL)
+}
 
 source("R/01_utils.R")
 source("R/10_sc_spillover.R")
@@ -43,7 +64,11 @@ Rcpp::sourceCpp("src/40_geweke_latest.cpp")
 
 # Assume the simulation engine functions are already part of the package
 set.seed(20251030)
-message(sprintf("[seed-init] script=simulation_main global_seed=%d mode=%s", 20251030L, run_mode))
+message(sprintf(
+  "[seed-init] script=simulation_main global_seed=%d mode=%s",
+  20251030L,
+  run_mode
+))
 
 
 ## -----------------------------------------------------------------------------
@@ -252,7 +277,6 @@ for (N in Ns) {
 }
 
 
-
 ## -----------------------------------------------------------------------------
 library(dplyr)
 library(tidyr)
@@ -403,9 +427,15 @@ make_table2_lines <- function(mc_res, method_proposed = "Proposed") {
   rho_vals <- sort(unique(cov_df$rho))
   block_width <- length(n_vals)
 
-  col_spec <- paste0("l", paste(rep("r", block_width * length(t0_vals)), collapse = ""))
+  col_spec <- paste0(
+    "l",
+    paste(rep("r", block_width * length(t0_vals)), collapse = "")
+  )
   header_top <- paste(
-    purrr::map_chr(t0_vals, ~ sprintf("\\multicolumn{%d}{c}{$T_{0}=%d$}", block_width, .x)),
+    purrr::map_chr(
+      t0_vals,
+      ~ sprintf("\\multicolumn{%d}{c}{$T_{0}=%d$}", block_width, .x)
+    ),
     collapse = " & "
   )
   cmid <- paste(
@@ -416,7 +446,10 @@ make_table2_lines <- function(mc_res, method_proposed = "Proposed") {
     }),
     collapse = " "
   )
-  header_bottom <- paste(rep(sprintf("$N=%d$", n_vals), length(t0_vals)), collapse = " & ")
+  header_bottom <- paste(
+    rep(sprintf("$N=%d$", n_vals), length(t0_vals)),
+    collapse = " & "
+  )
 
   lines <- c(
     "\\begin{table}[H]",
@@ -440,7 +473,10 @@ make_table2_lines <- function(mc_res, method_proposed = "Proposed") {
         vals <- c(vals, if (length(v) == 0) "" else sprintf("%.3f", v[1]))
       }
     }
-    lines <- c(lines, paste(sprintf("% .1f", r), "&", paste(vals, collapse = " & "), "\\\\"))
+    lines <- c(
+      lines,
+      paste(sprintf("% .1f", r), "&", paste(vals, collapse = " & "), "\\\\")
+    )
   }
 
   notes <- c(
@@ -516,3 +552,7 @@ write_simulation_tables(
   T1_val = 20,
   file = "output/tables/simulation_results.tex"
 )
+
+sync_paper_tables(c(
+  "simulation_results.tex"
+))

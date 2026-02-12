@@ -1,6 +1,6 @@
 args <- commandArgs(trailingOnly = TRUE)
 mode <- if (length(args) >= 1) tolower(args[[1]]) else tolower(Sys.getenv("SCSPILL_MODE", "full"))
-target <- if (length(args) >= 2) tolower(args[[2]]) else "all"
+target <- if (length(args) >= 2) tolower(args[[2]]) else tolower(Sys.getenv("SCSPILL_TARGET", "all"))
 
 if (!mode %in% c("full", "smoke")) {
   stop("Mode must be 'full' or 'smoke'.")
@@ -8,6 +8,10 @@ if (!mode %in% c("full", "smoke")) {
 if (!target %in% c("all", "main", "simulation", "geweke")) {
   stop("Target must be one of: all, main, simulation, geweke.")
 }
+
+interactive_step <- interactive() &&
+  length(args) == 0 &&
+  identical(tolower(Sys.getenv("SCSPILL_INTERACTIVE_STEP", "true")), "true")
 
 mode_purpose <- switch(
   mode,
@@ -154,7 +158,22 @@ if (clean_output) {
 }
 
 timestamp <- format(Sys.time(), "%Y%m%d-%H%M%S")
+aborted_by_user <- FALSE
 for (script in scripts) {
+  if (interactive_step) {
+    ans <- tolower(trimws(readline(sprintf(
+      "About to run %s [mode=%s, target=%s]. Press Enter to continue or type 'q' to stop: ",
+      script,
+      mode,
+      target
+    ))))
+    if (ans %in% c("q", "quit")) {
+      message(sprintf("Stopped by user before: %s", script))
+      aborted_by_user <- TRUE
+      break
+    }
+  }
+
   log_file <- file.path(
     "output/logs",
     sprintf("%s_%s_%s.log", timestamp, tools::file_path_sans_ext(basename(script)), mode)
@@ -186,11 +205,15 @@ for (script in scripts) {
   message(sprintf("Log: %s", log_file))
 }
 
-check_expected_outputs(target)
+if (!aborted_by_user) {
+  check_expected_outputs(target)
 
-if (mode == "smoke") {
-  message("Smoke run completed: pipeline integrity verified.")
+  if (mode == "smoke") {
+    message("Smoke run completed: pipeline integrity verified.")
+  } else {
+    message("Full run completed: manuscript-scale outputs generated.")
+  }
+  message("Replication workflow completed.")
 } else {
-  message("Full run completed: manuscript-scale outputs generated.")
+  message("Partial interactive run completed. Expected-output checks were skipped.")
 }
-message("Replication workflow completed.")

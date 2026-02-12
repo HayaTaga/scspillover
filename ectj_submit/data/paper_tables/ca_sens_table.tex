@@ -1,0 +1,27 @@
+\begin{table}[H]
+\centering
+\caption{Prior Sensitivity Analysis (California Tobacco Tax)}
+\label{tab:ca_sens}
+\centering
+\resizebox{\ifdim\width>\linewidth\linewidth\else\width\fi}{!}{
+\begin{tabular}[t]{rrrrrlrrrr}
+\toprule
+$a_0$ & $b_0$ & $\rho_{\mathrm{lo}}$ & $\rho_{\mathrm{hi}}$ & $\Delta\rho$ & Parameter & Mean  & SD  & 2.5\% &  97.5\%\\
+\midrule
+3 & 1.0 & -0.5 & 0.5 & 0.05 & rho & 0.4968491 & 0.0031053 & 0.4884527 & 0.4999165\\
+3 & 1.0 & -0.5 & 0.5 & 0.05 & sigma2 & 1774.4801696 & 96.1709452 & 1596.2061629 & 1972.7777037\\
+3 & 1.0 & -0.5 & 0.5 & 0.05 & beta[1] & 0.8648020 & 0.0250859 & 0.8159419 & 0.9143218\\
+5 & 1.0 & -0.3 & 0.3 & 0.03 & rho & 0.2980091 & 0.0019977 & 0.2926308 & 0.2999507\\
+5 & 1.0 & -0.3 & 0.3 & 0.03 & sigma2 & 2390.5653685 & 129.0438905 & 2150.5123786 & 2656.2601831\\
+\addlinespace
+5 & 1.0 & -0.3 & 0.3 & 0.03 & beta[1] & 1.2450636 & 0.0285566 & 1.1891587 & 1.3010971\\
+2 & 0.5 & -0.7 & 0.7 & 0.07 & rho & 0.6539283 & 0.0192865 & 0.6148704 & 0.6900487\\
+2 & 0.5 & -0.7 & 0.7 & 0.07 & sigma2 & 1511.6318669 & 84.4849990 & 1355.1640395 & 1686.0818546\\
+2 & 0.5 & -0.7 & 0.7 & 0.07 & beta[1] & 0.5642511 & 0.0432198 & 0.4826720 & 0.6511151\\
+\bottomrule
+\end{tabular}}
+\begin{tablenotes}
+  \footnotesize
+  \item \textit{Notes:} This table presents the posterior means, standard deviations, and 95\% credible intervals for key parameters ($\rho$, $\sigma^2$, $\beta_1$) under alternative prior hyperparameter settings. $(a_0, b_0)$ correspond to the Inverse-Gamma prior for $\sigma^2$, and $(\rho_{lo}, \rho_{hi})$ define the Uniform prior support for $\rho$. The stability of the estimates across different settings indicates robustness to prior specification.
+\end{tablenotes}
+\end{table}

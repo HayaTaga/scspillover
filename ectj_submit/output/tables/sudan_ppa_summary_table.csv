@@ -1,0 +1,10 @@
+"Statistic","Observed_Value_h_y_obs","P_Value_P_h_y_obs"
+"Mean",2142.779,0.806
+"log-Var",15.666,0.617
+"Spatial Quad.",7464968.1,0.619
+"Corr($Y_0$, $w'Y$)",0.799,0.746
+"AC(1)",0.892,0.346
+"AC(2)",0.786,0.298
+"PVE(PC1)",0.823,0.507
+"Skewness",0.145,0.924
+"Kurtosis",-1.312,0.496

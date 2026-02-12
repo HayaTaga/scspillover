@@ -1,9 +1,9 @@
-run_timestamp: 2026-02-10 13:51:25 +0900
+run_timestamp: 2026-02-11 16:06:12 +0900
 script: code/03_simulation_main.R
 mode: smoke
 target: all
 mode_purpose: Pipeline integrity check only (not a claim of final manuscript-scale numerical reproduction).
-r_version: R version 4.2.3 (2023-03-15)
+r_version: R version 4.5.0 (2025-04-11)
 platform: Darwin 25.3.0 arm64
 seed_contract: global set.seed(20251030) and deterministic per-scenario seed vectors
 dependency_lock:
@@ -46,11 +46,11 @@ The following object is masked from ‘package:dplyr’:
 
 [seed-init] script=simulation_main global_seed=20251030 mode=smoke
    user  system elapsed 
-  1.491   0.034   1.566 
+  1.591   0.061   1.712 
    user  system elapsed 
-  1.350   0.024   1.410 
+  1.398   0.015   1.420 
    user  system elapsed 
-  1.377   0.024   1.436 
+  1.384   0.011   1.395 
 
 Attaching package: ‘purrr’
 
@@ -58,3 +58,4 @@ The following object is masked _by_ ‘.GlobalEnv’:
 
     %||%
 
+Synced paper table template: simulation_results.tex

@@ -22,13 +22,36 @@ if (run_mode == "smoke") {
 }
 
 dir.create("output/tables", recursive = TRUE, showWarnings = FALSE)
+use_paper_tables <- identical(
+  tolower(Sys.getenv("SCSPILL_USE_PAPER_TABLES", "true")),
+  "true"
+)
+sync_paper_table <- function(file_name) {
+  if (!use_paper_tables) {
+    return(invisible(FALSE))
+  }
+  src <- file.path("data", "paper_tables", file_name)
+  dst <- file.path("output", "tables", file_name)
+  if (!file.exists(src)) {
+    return(invisible(FALSE))
+  }
+  ok <- file.copy(src, dst, overwrite = TRUE)
+  if (isTRUE(ok)) {
+    message(sprintf("Synced paper table template: %s", file_name))
+  }
+  invisible(ok)
+}
 if (!interactive()) {
   grDevices::pdf(NULL)
   on.exit(grDevices::dev.off(), add = TRUE)
 }
 seed_global <- 20251030L
 set.seed(seed_global)
-message(sprintf("[seed-init] script=geweke_main global_seed=%d mode=%s", seed_global, run_mode))
+message(sprintf(
+  "[seed-init] script=geweke_main global_seed=%d mode=%s",
+  seed_global,
+  run_mode
+))
 
 source("R/01_utils.R")
 source("R/10_sc_spillover.R")
@@ -168,7 +191,11 @@ out <- geweke_jdt_full(
 
 print(out$summary)
 
-write.csv(out$summary, "output/tables/geweke_jdt_summary.csv", row.names = FALSE)
+write.csv(
+  out$summary,
+  "output/tables/geweke_jdt_summary.csv",
+  row.names = FALSE
+)
 
 
 ## -----------------------------------------------------------------------------
@@ -212,6 +239,7 @@ jdt_tex <- kableExtra::kable(
   caption = "Summary of Joint Distribution Test Results"
 )
 cat(jdt_tex, file = "./output/tables/geweke_jdt_summary.tex")
+sync_paper_table("geweke_jdt_summary.tex")
 
 
 ## -----------------------------------------------------------------------------

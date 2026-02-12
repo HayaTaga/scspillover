@@ -44,7 +44,11 @@ if (!interactive()) {
 }
 seed_global <- 20251022L
 set.seed(seed_global)
-message(sprintf("[seed-init] script=sudan_main global_seed=%d mode=%s", seed_global, run_mode))
+message(sprintf(
+  "[seed-init] script=sudan_main global_seed=%d mode=%s",
+  seed_global,
+  run_mode
+))
 
 source("R/01_utils.R")
 source("R/02_utils_data_prep.R")
@@ -62,14 +66,19 @@ Rcpp::sourceCpp("src/40_geweke_latest.cpp")
 
 load("./data/sudan_secession.rda")
 
-panel_df <- sudan_secession$panel
+panel_df <- if ("panel" %in% names(sudan_secession)) {
+  sudan_secession[["panel"]]
+} else if ("panel_df" %in% names(sudan_secession)) {
+  sudan_secession[["panel_df"]]
+} else {
+  stop("sudan_secession must contain 'panel' or 'panel_df'.")
+}
 w_vec <- sudan_secession$w
 W_mat <- sudan_secession$W
 panel_df <- panel_df %>%
   mutate(
     treatment = ifelse((country == "Sudan") & (year >= 2011), 1, 0)
   )
-
 
 
 ## -----------------------------------------------------------------------------
@@ -92,7 +101,6 @@ fit <- sc_spillover(
   unit_col = "country",
   time_col = "year"
 )
-
 
 
 ## ----fig3b--------------------------------------------------------------------
@@ -382,36 +390,59 @@ ppc <- prior_predictive(
   R = ppc_rep
 )
 
-stat_names <- c(
-  "yc\\_mean",
-  "log\\_yc\\_var",
-  "spatial\\_quadratic",
-  "corr\\_y0\\_wyc",
+stat_keys <- c(
+  "yc_mean",
+  "log_yc_var",
+  "spatial_quadratic",
+  "corr_y0_wyc",
   "ac1",
   "ac2",
-  "pve\\_pc1",
-  "avg\\_skewness",
-  "avg\\_kurtosis"
+  "pve_pc1",
+  "avg_skewness",
+  "avg_kurtosis"
 )
+
+resolve_stat_cols <- function(available_names, target_keys) {
+  normalized <- gsub("\\\\", "", available_names)
+  idx <- match(target_keys, normalized)
+  if (any(is.na(idx))) {
+    missing_keys <- target_keys[is.na(idx)]
+    stop(sprintf(
+      "Missing prior-predictive statistics: %s",
+      paste(missing_keys, collapse = ", ")
+    ))
+  }
+  available_names[idx]
+}
+
+sim_stat_cols <- resolve_stat_cols(colnames(ppc$stat), stat_keys)
 
 
 sim_long <- ppc$stat %>%
   as.data.frame() %>%
   pivot_longer(
-    cols = all_of(stat_names),
+    cols = all_of(sim_stat_cols),
     names_to = "statistic",
     values_to = "simulated_value"
+  ) %>%
+  mutate(
+    statistic = gsub("\\\\", "", statistic),
+    statistic = gsub("_", " ", statistic)
   )
 
 ppc_observed_tmp <- ppc$observed %>% t()
-colnames(ppc_observed_tmp) <- gsub("_", "\\\\_", colnames(ppc_observed_tmp))
+obs_stat_cols <- resolve_stat_cols(colnames(ppc_observed_tmp), stat_keys)
 
 obs_long <- ppc_observed_tmp %>%
   as.data.frame() %>%
   pivot_longer(
-    cols = all_of(stat_names),
+    cols = all_of(obs_stat_cols),
     names_to = "statistic",
     values_to = "observed_value"
+  ) %>%
+  mutate(
+    statistic = gsub("\\\\", "", statistic),
+    statistic = gsub("_", " ", statistic)
   )
 
 # --- 2. ggplot オブジェクトの作成 ---
@@ -483,7 +514,11 @@ ppc_table$P_Value_P_h_y_obs <- round(ppc_table$P_Value_P_h_y_obs, 3)
 
 print(ppc_table)
 
-write.csv(ppc_table, "output/tables/sudan_ppa_summary_table.csv", row.names = FALSE)
+write.csv(
+  ppc_table,
+  "output/tables/sudan_ppa_summary_table.csv",
+  row.names = FALSE
+)
 
 latex_col_names <- c("Statistic", "Observed", "$P(h \\leq h(y^{o}) | A)$")
 
@@ -509,7 +544,6 @@ save_kable(ppa_kable_object, "output/tables/sudan_ppa_summary_table.tex")
 
 # (Optional) Print the LaTeX code to the console to check
 print(ppa_kable_object)
-
 
 
 ## -----------------------------------------------------------------------------

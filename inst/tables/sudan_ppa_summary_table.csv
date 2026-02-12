@@ -1,0 +1,10 @@
+"Statistic","Observed_Value_h_y_obs","P_Value_P_h_y_obs"
+"yc_mean",2142.77892598176,NA
+"log_yc_var",15.6656683470332,NA
+"spatial_quadratic",7374494.78509866,NA
+"corr_y0_wyc",0.899638664096082,NA
+"ac1",0.892437819529002,0.319318
+"ac2",0.785601649319223,0.230628
+"pve_pc1",0.822680985713438,NA
+"avg_skewness",0.145050015452303,NA
+"avg_kurtosis",-1.31161053278364,NA

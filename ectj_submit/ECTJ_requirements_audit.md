@@ -86,7 +86,7 @@ Source documents treated as authoritative specification:
 |---|---|---|
 | M1 | satisfied | `code/99_run_all.R` + `RESULTS_MAPPING.csv` define complete reproducible workflow. |
 | M2 | satisfied | `README_submit.md` and `README.pdf` exist; software/dependency versions documented with `DEPENDENCY_LOCK.csv`. |
-| M3 | satisfied | Input data in `data/`; variable documentation in `data/VARIABLE_DICTIONARY.md`. |
+| M3 | satisfied | Input data in `data/` including `data/raw/`, bundled `.rda`, and variable documentation in `data/VARIABLE_DICTIONARY.md`. |
 | M4 | satisfied | Reproduction scripts in `code/01_*.R` to `code/04_*.R`. |
 | M5 | satisfied | Fixed seed initialization in scripts and seed contracts recorded in logs. |
 | M6 | satisfied | Non-proprietary dataset copies in `data/nonproprietary/`. |

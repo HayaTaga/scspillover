@@ -13,6 +13,8 @@ library(sf)
 library(spdep)
 library(tibble) # rownames_to_column
 
+dir.create("data/processed/tobacco", recursive = TRUE, showWarnings = FALSE)
+
 # --------------------------------------------------------------
 # 1) Load & tidy the smoking panel (state, state_id, year, cigsale, retprice)
 # --------------------------------------------------------------

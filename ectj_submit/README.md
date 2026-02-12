@@ -7,13 +7,11 @@ Primary entry point for the Data Editor:
 
 Execution entry points:
 - `code/99_run_all.R` (master script)
-- `Makefile` (`make run SCSPILL_MODE=full`)
 
 Core folders:
 - `code/`: substantive replication scripts (`.R`)
 - `data/`: bundled datasets and documentation
 - `output/`: generated figures/tables/logs (recreated by scripts)
-- `vignettes/`: thin wrappers only
 
 For detailed compliance mapping against ECTJ guidance, see:
 - `ECTJ_requirements_audit.md`

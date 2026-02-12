@@ -1,39 +1,39 @@
-"state_id","value"
-1,0
-2,0
-3,0
-4,0
-5,0
-6,0
-7,0
-8,0
-9,0
-10,0
-11,0
-12,0
-13,0
-14,0
-15,0
-16,0
-17,0
-18,0
-19,0
-20,1
-21,0
-22,0
-23,0
-24,0
-25,0
-26,0
-27,0
-28,0
-29,0
-30,0
-31,0
-32,0
-33,0
-34,0
-35,0
-36,0
-37,0
-38,0
+"state","adj"
+"Alabama",0
+"Arkansas",0
+"Colorado",0
+"Connecticut",0
+"Delaware",0
+"Georgia",0
+"Idaho",0
+"Illinois",0
+"Indiana",0
+"Iowa",0
+"Kansas",0
+"Kentucky",0
+"Louisiana",0
+"Maine",0
+"Minnesota",0
+"Mississippi",0
+"Missouri",0
+"Montana",0
+"Nebraska",0
+"Nevada",1
+"New Hampshire",0
+"New Mexico",0
+"North Carolina",0
+"North Dakota",0
+"Ohio",0
+"Oklahoma",0
+"Pennsylvania",0
+"Rhode Island",0
+"South Carolina",0
+"South Dakota",0
+"Tennessee",0
+"Texas",0
+"Utah",0
+"Vermont",0
+"Virginia",0
+"West Virginia",0
+"Wisconsin",0
+"Wyoming",0

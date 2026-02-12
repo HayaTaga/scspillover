@@ -1,9 +1,9 @@
-run_timestamp: 2026-02-10 13:51:45 +0900
+run_timestamp: 2026-02-11 16:06:35 +0900
 script: code/04_geweke_main.R
 mode: smoke
 target: all
 mode_purpose: Pipeline integrity check only (not a claim of final manuscript-scale numerical reproduction).
-r_version: R version 4.2.3 (2023-03-15)
+r_version: R version 4.5.0 (2025-04-11)
 platform: Darwin 25.3.0 arm64
 seed_contract: global set.seed(20251030)
 dependency_lock:
@@ -82,6 +82,7 @@ Table: Summary of Joint Distribution Test Results
 |$\bar{\beta}$             |   0.0091529|  -0.0480677|  0.0099556| 0.0895335|  0.6351831| 0.5253090|
 |$\bar{\eta}$              |   0.0012192|  -0.0220267|  0.0050091| 0.0204800|  1.1025522| 0.2702217|
 |$\bar{\Gamma}$            |   0.0000391|  -0.0103696|  0.0035771| 0.0126963|  0.7890954| 0.4300562|
+Synced paper table template: geweke_jdt_summary.tex
 
 
 Table: Appendix JDT with custom g-function.

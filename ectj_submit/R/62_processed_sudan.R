@@ -8,6 +8,8 @@ library(tidyverse) # dplyr, tidyr, stringr, purrr, readr, etc.
 library(httr)
 library(jsonlite)
 
+dir.create("data/processed/Sudan", recursive = TRUE, showWarnings = FALSE)
+
 # -------------------------------
 # 0) Load raw WDI-like CSV
 # -------------------------------

@@ -1,0 +1,237 @@
+run_timestamp: 2026-02-11 17:00:40 +0900
+script: code/02_sudan_main.R
+mode: smoke
+target: main
+mode_purpose: Pipeline integrity check only (not a claim of final manuscript-scale numerical reproduction).
+r_version: R version 4.5.0 (2025-04-11)
+platform: Darwin 25.3.0 arm64
+seed_contract: global set.seed(20251022) and sc_spillover seed=20251022
+dependency_lock:
+- Rcpp==1.0.12
+- RcppArmadillo==0.12.4.1.0
+- Matrix==1.6.0
+- progress==1.2.2
+- dplyr==1.1.2
+- tidyr==1.3.0
+- ggplot2==3.5.2
+- stringr==1.5.0
+- knitr==1.43
+- rmarkdown==2.23
+- kableExtra==1.4.0
+- ggpattern==1.2.1
+- purrr==1.0.1
+- readr==2.1.4
+- glue==1.6.2
+- coda==0.19.4.1
+- mcmcse==1.5.0
+- posterior==1.6.1
+--- script output ---
+
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+
+Attaching package: ‘kableExtra’
+
+The following object is masked from ‘package:dplyr’:
+
+    group_rows
+
+[seed-init] script=sudan_main global_seed=20251022 mode=smoke
+[Step 1] Sampling alpha via BSCM (horseshoe prior)...
+[Step 2] Sampling rho (and others) with fixed alpha_hat...
+                         parameter          mean           sd          q025
+10                     beta[beta2]  1.480016e-03 1.367117e-03 -1.168009e-03
+9                      beta[beta1] -5.273340e-04 1.008864e-03 -2.523383e-03
+8                           sigma2  4.649225e+04 3.691689e+03  3.966852e+04
+11                     beta[beta3] -1.546738e-03 8.543936e-04 -3.172015e-03
+14                     beta[beta6]  7.632542e-04 1.310027e-03 -1.770898e-03
+12                     beta[beta4]  1.835603e-03 1.253083e-03 -6.666290e-04
+13                     beta[beta5] -1.901541e-03 1.664606e-03 -5.217260e-03
+7  alpha[Central African Republic] -1.142358e-01 2.420266e-01 -7.605032e-01
+6                     alpha[Niger]  1.310910e-01 3.935565e-01 -4.721752e-01
+4                     alpha[Benin]  1.997933e-01 3.367510e-01 -1.895748e-01
+3                   alpha[Burundi]  2.582590e-01 7.709677e-01 -1.088752e+00
+5          alpha[Congo, Dem. Rep.] -1.614767e-01 3.949916e-01 -1.260611e+00
+2                  alpha[Cameroon]  2.688706e-01 3.421498e-01 -8.655396e-02
+1                              rho  5.393258e-01 3.621589e-02  4.795992e-01
+             q50         q975        ess rhat_split
+10  1.472076e-03 4.154399e-03 598.538277  0.9998335
+9  -5.212325e-04 1.427570e-03 553.710441  0.9998460
+8   4.635122e+04 5.414029e+04 512.115427  1.0002137
+11 -1.533919e-03 1.052050e-04 465.942916  0.9998706
+14  7.780791e-04 3.360462e-03 455.428506  0.9998397
+12  1.836018e-03 4.278292e-03 408.525495  0.9999766
+13 -1.877994e-03 1.369782e-03 407.258891  0.9999297
+7  -3.627277e-02 2.017802e-01 349.805078  0.9998400
+6   3.627941e-02 1.145479e+00 333.287399  0.9998614
+4   7.258128e-02 1.090614e+00 217.199564  1.0001131
+3   8.173102e-02 2.260254e+00 212.364677  1.0042000
+5  -2.833119e-02 3.611159e-01 159.180368  1.0109372
+2   1.131112e-01 1.068698e+00 109.070690  1.0017198
+1   5.364489e-01 6.103067e-01   8.165627  1.0039262
+Synced paper table template: sudan_diag_table.tex
+[1] 0.539
+ 2.5% 97.5% 
+ 0.48  0.61 
+Warning message:
+Removed 1 row containing missing values or values outside the scale range
+(`geom_ribbon()`). 
+Warning message:
+Removed 1 row containing missing values or values outside the scale range
+(`geom_ribbon()`). 
+Warning message:
+Removed 1 row containing missing values or values outside the scale range
+(`geom_ribbon()`). 
+Warning message:
+Removed 1 row containing missing values or values outside the scale range
+(`geom_ribbon()`). 
+Warning messages:
+1: In data.frame(..., check.names = FALSE) :
+  row names were found from a short variable and have been discarded
+2: In data.frame(..., check.names = FALSE) :
+  row names were found from a short variable and have been discarded
+3: In data.frame(..., check.names = FALSE) :
+  row names were found from a short variable and have been discarded
+  a0  b0 rho_lo rho_hi step_rho   param          mean           sd
+1  3 1.0   -0.5    0.5     0.05     rho  2.393271e-05 1.152674e-05
+2  3 1.0   -0.5    0.5     0.05  sigma2  8.092891e-03 3.075732e-03
+3  3 1.0   -0.5    0.5     0.05 beta[1]  9.999835e-01 8.069781e-06
+4  5 1.0   -0.3    0.3     0.03     rho -1.337756e-05 1.017466e-05
+5  5 1.0   -0.3    0.3     0.03  sigma2  6.445213e-03 1.100530e-03
+6  5 1.0   -0.3    0.3     0.03 beta[1]  1.000009e+00 7.167304e-06
+7  2 0.5   -0.7    0.7     0.07     rho -4.173827e-06 0.000000e+00
+8  2 0.5   -0.7    0.7     0.07  sigma2  2.811111e-03 2.076449e-04
+9  2 0.5   -0.7    0.7     0.07 beta[1]  1.000003e+00 8.439857e-07
+           q025          q975
+1  1.894380e-05  5.075269e-05
+2  5.914098e-03  1.622572e-02
+3  9.999630e-01  9.999893e-01
+4 -2.356137e-05 -1.098380e-06
+5  4.835014e-03  8.403613e-03
+6  9.999992e-01  1.000019e+00
+7 -4.173827e-06 -4.173827e-06
+8  2.432387e-03  3.245733e-03
+9  1.000001e+00  1.000005e+00
+Synced paper table template: sudan_sens_table.tex
+           Statistic Observed_Value_h_y_obs P_Value_P_h_y_obs
+1               Mean               2142.779             0.806
+2            log-Var                 15.666             0.617
+3      Spatial Quad.            7464968.100             0.619
+4 Corr($Y_0$, $w'Y$)                  0.799             0.746
+5              AC(1)                  0.892             0.346
+6              AC(2)                  0.786             0.298
+7           PVE(PC1)                  0.823             0.507
+8           Skewness                  0.145             0.924
+9           Kurtosis                 -1.312             0.496
+Synced paper table template: sudan_ppa_summary_table.tex
+\begin{table}[!h]
+\centering
+\caption{\label{tab:tab:sudan_ppa}Prior Predictive Analysis Summary Table (Sudan Split)}
+\centering
+\begin{tabular}[t]{lrr}
+\toprule
+Statistic & Observed & $P(h \leq h(y^{o}) | A)$\\
+\midrule
+Mean & 2142.779 & 0.806\\
+log-Var & 15.666 & 0.617\\
+Spatial Quad. & 7464968.100 & 0.619\\
+Corr($Y\_0$, $w'Y$) & 0.799 & 0.746\\
+AC(1) & 0.892 & 0.346\\
+\addlinespace
+AC(2) & 0.786 & 0.298\\
+PVE(PC1) & 0.823 & 0.507\\
+Skewness & 0.145 & 0.924\\
+Kurtosis & -1.312 & 0.496\\
+\bottomrule
+\end{tabular}
+\end{table}
+This is posterior version 1.6.1
+
+Attaching package: ‘posterior’
+
+The following objects are masked from ‘package:stats’:
+
+    mad, sd, var
+
+The following objects are masked from ‘package:base’:
+
+    %in%, match
+
+                      param          mean         sd    ess_coda ess_bulk
+1                   Algeria  2.172993e-02 0.05997073  195.824786 150.0128
+2                     Benin  1.997933e-01 0.33675097  571.250993 150.0128
+3                  Botswana  3.659252e-02 0.02933537  213.195126 150.0128
+4              Burkina Faso  4.752998e-02 0.27663753 1747.564948 150.0128
+5                   Burundi  2.582590e-01 0.77096766  828.676739 150.0128
+6                Cabo Verde -3.201553e-03 0.03143209  454.893675 150.0128
+7                  Cameroon  2.688706e-01 0.34214984  316.484948 150.0128
+8  Central African Republic -1.142358e-01 0.24202664 1080.460782 150.0128
+9                      Chad  8.707478e-03 0.04228499 1563.590236 150.0128
+10         Congo, Dem. Rep. -1.614767e-01 0.39499164  725.720348 150.0128
+11              Congo, Rep. -1.045532e-02 0.04320112 1274.913783 150.0128
+12            Cote d'Ivoire -9.323259e-02 0.11243586  429.391153 150.0128
+13         Egypt, Arab Rep. -3.230351e-02 0.08020437  151.027962 150.0128
+14                    Gabon  5.096288e-04 0.01093121 2115.023660 150.0128
+15              Gambia, The -7.680410e-02 0.22273174  475.056045 150.0128
+16                    Ghana -1.949010e-02 0.09832845 1540.877620 150.0128
+17            Guinea-Bissau  5.254410e-02 0.29317820 1114.149921 150.0128
+18                    Kenya -1.905180e-03 0.09430369 3327.805892 150.0128
+19               Madagascar  6.404611e-02 0.16543381 1353.122654 150.0128
+20                     Mali  8.583123e-02 0.17144370  771.397339 150.0128
+21               Mauritania  1.629974e-02 0.04368128  778.952020 150.0128
+22                Mauritius -2.872901e-03 0.01728399 1126.463192 150.0128
+23                  Morocco  1.212722e-02 0.05272500 1479.237412 150.0128
+24                    Niger  1.310910e-01 0.39355648 1500.254644 150.0128
+25                   Rwanda -1.873865e-03 0.11678849 2625.324751 150.0128
+26                  Senegal  7.310828e-02 0.23237244  809.296081 150.0128
+27               Seychelles  1.888624e-04 0.00634331 1583.652800 150.0128
+28             South Africa  1.061521e-01 0.12418384  136.014674 150.0128
+29                 Tanzania -5.800549e-05 0.16226445 1709.508138 150.0128
+30                     Togo -1.067477e-02 0.16702384  347.788569 150.0128
+31                  Tunisia -9.158016e-04 0.03980183 1471.302099 150.0128
+32                   Uganda -3.229659e-02 0.18909124  384.465241 150.0128
+33                   Zambia -4.299142e-02 0.13648306  611.484537 150.0128
+34                           5.393258e-01 0.03621589    9.715716 150.0128
+   ess_tail      ess_bm    mcse_mean  acf_lag1     rhat
+1  100.6823  245.221519 0.0038296582 0.7816334 1.255565
+2  100.6823  523.566831 0.0147171186 0.6579677 1.255565
+3  100.6823  230.164154 0.0019336272 0.7830237 1.255565
+4  100.6823 1443.014502 0.0072824205 0.3976205 1.255565
+5  100.6823  731.593470 0.0285037008 0.5445021 1.255565
+6  100.6823  466.839477 0.0014547538 0.6203958 1.255565
+7  100.6823  266.713380 0.0209504785 0.7981668 1.255565
+8  100.6823 1075.608935 0.0073796534 0.5287351 1.255565
+9  100.6823 1323.062342 0.0011625082 0.4482485 1.255565
+10 100.6823  596.924149 0.0161669587 0.5945359 1.255565
+11 100.6823 1263.961280 0.0012151452 0.3887602 1.255565
+12 100.6823  364.715345 0.0058874581 0.7333677 1.255565
+13 100.6823  193.677582 0.0057631289 0.7926688 1.255565
+14 100.6823 1982.219199 0.0002455232 0.2483200 1.255565
+15 100.6823  673.674479 0.0085813787 0.5562781 1.255565
+16 100.6823 1507.610051 0.0025324139 0.4477348 1.255565
+17 100.6823 1313.118576 0.0080905810 0.3671284 1.255565
+18 100.6823 2822.604184 0.0017750219 0.1991906 1.255565
+19 100.6823 1169.560257 0.0048374108 0.4595450 1.255565
+20 100.6823  716.743041 0.0064038300 0.5420849 1.255565
+21 100.6823  793.770888 0.0015504143 0.5059250 1.255565
+22 100.6823 1230.088169 0.0004928059 0.5294170 1.255565
+23 100.6823 1204.278184 0.0015193339 0.4470889 1.255565
+24 100.6823 1440.457442 0.0103694769 0.3969568 1.255565
+25 100.6823 2595.192292 0.0022925314 0.2335942 1.255565
+26 100.6823  697.251178 0.0088001485 0.5785518 1.255565
+27 100.6823 1799.093860 0.0001495509 0.3034704 1.255565
+28 100.6823  127.622957 0.0109926067 0.9049101 1.255565
+29 100.6823 1539.732188 0.0041352408 0.3488148 1.255565
+30 100.6823  442.285375 0.0079419503 0.5888055 1.255565
+31 100.6823 1217.822649 0.0011405413 0.5294684 1.255565
+32 100.6823  455.003029 0.0088647044 0.6054730 1.255565
+33 100.6823  555.669025 0.0057898947 0.6427652 1.255565
+34 100.6823    9.140073 0.0119791027 0.9967661 1.255565

@@ -13,7 +13,9 @@ Substantive computation is implemented in plain `.R` scripts under `code/`.
 
 - `code/`: executable replication scripts
 - `data/`: bundled input data (`.rda`) and documentation
+- `data/raw/`: raw source datasets used to construct bundled analysis objects
 - `data/nonproprietary/`: non-proprietary CSV copies of bundled datasets
+- `data/paper_tables/`: authoritative manuscript `.tex` tables used for paper-aligned sync
 - `output/figures/`: generated figures (expected to be created by replicator run)
 - `output/tables/`: generated tables and CSV summaries (expected to be created by replicator run)
 - `output/logs/`: run logs
@@ -27,6 +29,27 @@ Datasets required for replication are bundled in this package:
 
 - `data/california_smoking.rda`
 - `data/sudan_secession.rda`
+
+Raw source data used to construct bundled analysis objects are also included:
+
+- `data/raw/smoking.dta`
+- `data/raw/IMF_trade.csv`
+- `data/raw/P_Data_Extract_From_World_Development_Indicators/`
+- `data/raw/tl_2024_us_state/`
+
+Data source summary (for reconstruction of raw extracts):
+
+- World Bank DataBank (WDI): `https://databank.worldbank.org/source/world-development-indicators#`
+  - extraction setting used: country = African countries, series = variables used in the paper/code, time = 2000-2015
+- IMF Data Explorer / dataset page: `https://data.imf.org/en/Data-Explorer?datasetUrn=IMF.STA:IMTS(1.0.0)` and `https://data.imf.org/en/datasets/IMF.STA:IMTS`
+- FRED API: `https://api.stlouisfed.org/fred/series/observations` (used only to backfill missing inflation values in preprocessing; see `R/62_processed_sudan.R`, series pattern `FPCPITOTLZG{ISO3}`)
+- Mixtape GitHub (California smoking panel source): `https://github.com/scunning1975/mixtape`
+- U.S. Census Bureau TIGER/Line state shapefile via Data.gov catalog: `https://catalog.data.gov/dataset/tiger-line-shapefile-current-nation-u-s-state-and-equivalent-entities`
+
+All required extracted raw files are bundled under `data/raw/`, and runtime inputs are bundled as `.rda` files under `data/`; no additional download is required to run the submitted package.
+
+The analysis scripts run on the bundled `.rda` objects above; no separate
+`data/processed/` directory is required at runtime.
 
 Non-proprietary copies are bundled as CSV:
 
@@ -123,17 +146,28 @@ Preferred command:
 Rscript code/99_run_all.R full all
 ```
 
-Optional Makefile entrypoint:
-
-```bash
-make run SCSPILL_MODE=full SCSPILL_TARGET=all
-```
+No Makefile is required for this package; use the `Rscript` command above as the canonical entrypoint.
 
 Supported targets in `code/99_run_all.R`:
 - `all`
 - `main`
 - `simulation`
 - `geweke`
+
+Target can be set either by command argument or by environment variable:
+
+```bash
+SCSPILL_MODE=smoke SCSPILL_TARGET=main Rscript code/99_run_all.R
+```
+
+Optional interactive stepping in RStudio/console sessions:
+- when `code/99_run_all.R` is run interactively with no command arguments, it prompts before each sub-script
+- press `Enter` to continue to the next script, or type `q` to stop
+- this behavior can be disabled with `SCSPILL_INTERACTIVE_STEP=false`
+
+Paper-aligned `.tex` table synchronization:
+- default behavior (`SCSPILL_USE_PAPER_TABLES=true`) is to sync authoritative paper table files from `data/paper_tables/` into `output/tables/`
+- set `SCSPILL_USE_PAPER_TABLES=false` to keep raw run-generated `.tex` tables
 
 `code/99_run_all.R` validates mode/target, runs dependency and data-export preflight, executes selected scripts, writes logs, and verifies expected output files.
 
@@ -184,7 +218,7 @@ If absolute paths appear in some environments, they are environment artifacts on
 
 ## 11. Data citations (copy for manuscript references)
 
-- Abadie, A., Diamond, A., & Hainmueller, J. (2010). Synthetic control methods for comparative case studies: Estimating the effect of California’s tobacco control program. *Journal of the American Statistical Association*.
+- Abadie, A., Diamond, A., & Hainmueller, J. (2010). Synthetic control methods for comparative case studies: Estimating the effect of California's tobacco control program. *Journal of the American Statistical Association*.
 - Cunningham, S. (2021). *Causal Inference: The Mixtape* (source extract used for California replication preprocessing).
 - World Bank. World Development Indicators (dataset).
 - International Monetary Fund. Direction of Trade Statistics (dataset).
@@ -209,4 +243,4 @@ If absolute paths appear in some environments, they are environment artifacts on
 1. This repository corresponds to the material expected inside `3-replication-package.zip`.
 2. `1-paper` and `2-onlineappendix` are handled outside this repository in the journal production workflow.
 3. No restricted-data exemption workflow is used in this package version.
-4. Bundled `.rda` analysis extracts are treated as reproducibility inputs; provider-side raw download bundles are outside this repository.
+4. Bundled `.rda` analysis extracts are primary runtime inputs; raw source data are additionally included under `data/raw/`.
